@@ -31,6 +31,11 @@ from sklearn.pipeline import Pipeline
 from sklearn.feature_selection import SelectKBest, f_classif, VarianceThreshold, mutual_info_classif
 from sklearn.decomposition import PCA
 
+# Import torch for .pt file creation
+import torch
+import torch.nn as nn
+import pickle
+
 warnings.filterwarnings('ignore')
 
 # Set random seed for reproducibility
@@ -806,6 +811,72 @@ def analyze_model_performance_with_balanced_metrics(model, X_train, X_test, y_tr
     }
 
 
+# ---------------------------- Model Saving Functions ----------------------------
+def save_trained_model_pt(model, scaler=None, pca=None, model_type='model', results_dir='results'):
+    """Save trained model as .pt file for reuse without training"""
+    os.makedirs(results_dir, exist_ok=True)
+
+    model_data = {
+        'model': model,
+        'model_type': model_type,
+        'model_class': model.__class__.__name__,
+        'model_params': model.get_params(),
+        'scaler': scaler,
+        'pca': pca,
+        'classes': model.classes_ if hasattr(model, 'classes_') else None,
+        'n_features_in': model.n_features_in_ if hasattr(model, 'n_features_in_') else None,
+        'feature_names': None,  # Can be added if available
+        'timestamp': pd.Timestamp.now().isoformat(),
+        'description': f'Trained {model_type} model for tea leaf classification'
+    }
+
+    filename = os.path.join(results_dir, f'{model_type}_trained_model.pt')
+    torch.save(model_data, filename)
+    print(f"✓ Saved trained model to: {filename}")
+
+    return filename
+
+
+def load_trained_model_pt(model_path):
+    """Load a trained model from .pt file"""
+    if not os.path.exists(model_path):
+        print(f"Error: Model file {model_path} does not exist!")
+        return None
+
+    try:
+        model_data = torch.load(model_path)
+        print(f"✓ Loaded trained model: {model_data.get('model_type', 'Unknown')}")
+        return model_data
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        return None
+
+
+def predict_with_trained_model(model_data, features):
+    """Make predictions using a loaded trained model"""
+    if not model_data:
+        return None
+
+    model = model_data['model']
+    scaler = model_data['scaler']
+    pca = model_data['pca']
+
+    # Apply preprocessing if available
+    if scaler is not None:
+        features = scaler.transform(features)
+    if pca is not None:
+        features = pca.transform(features)
+
+    # Make predictions
+    predictions = model.predict(features)
+    probabilities = None
+
+    if hasattr(model, 'predict_proba'):
+        probabilities = model.predict_proba(features)
+
+    return predictions, probabilities
+
+
 # ---------------------------- SVM Training with Strong Regularization ----------------------------
 def train_svm_model_balanced(X, y, feature_names=None, results_dir='results'):
     """Train SVM model with balanced data and strong regularization"""
@@ -888,10 +959,13 @@ def train_svm_model_balanced(X, y, feature_names=None, results_dir='results'):
         best_svm, X_train_pca, y_train_balanced, "SVM", results_dir
     )
 
-    # Save model and components
+    # Save model and components (EXISTING CODE)
     joblib.dump(best_svm, os.path.join(results_dir, 'svm_model.joblib'))
     joblib.dump(scaler, os.path.join(results_dir, 'svm_scaler.joblib'))
     joblib.dump(pca, os.path.join(results_dir, 'svm_pca.joblib'))
+
+    # NEW: Save as .pt file for reuse without training
+    svm_model_path = save_trained_model_pt(best_svm, scaler, pca, 'svm', results_dir)
 
     # Save predictions
     preds_df = pd.DataFrame({
@@ -913,7 +987,8 @@ def train_svm_model_balanced(X, y, feature_names=None, results_dir='results'):
         'balanced_accuracy': balanced_acc,
         'roc_auc': roc_auc,
         'performance_results': performance_results,
-        'learning_curve_data': learning_curve_data
+        'learning_curve_data': learning_curve_data,
+        'model_path': svm_model_path  # Added model path
     }
 
 
@@ -986,9 +1061,12 @@ def train_decision_tree_model_pruned(X, y, feature_names=None, results_dir='resu
         best_dt, X_train_pca, y_train_balanced, "Decision Tree", results_dir
     )
 
-    # Save model
+    # Save model (EXISTING CODE)
     joblib.dump(best_dt, os.path.join(results_dir, 'decision_tree_model.joblib'))
     joblib.dump(pca, os.path.join(results_dir, 'decision_tree_pca.joblib'))
+
+    # NEW: Save as .pt file for reuse without training
+    dt_model_path = save_trained_model_pt(best_dt, None, pca, 'decision_tree', results_dir)
 
     # Save tree depth info
     tree_info = pd.DataFrame({
@@ -1005,7 +1083,8 @@ def train_decision_tree_model_pruned(X, y, feature_names=None, results_dir='resu
         'balanced_accuracy': balanced_acc,
         'roc_auc': roc_auc,
         'performance_results': performance_results,
-        'learning_curve_data': learning_curve_data
+        'learning_curve_data': learning_curve_data,
+        'model_path': dt_model_path  # Added model path
     }
 
 
@@ -1151,10 +1230,13 @@ def train_knn_model_conservative(X, y, feature_names=None, results_dir='results'
         best_knn, X_train_pca, y_train_balanced, "KNN", results_dir
     )
 
-    # Save model
+    # Save model (EXISTING CODE)
     joblib.dump(best_knn, os.path.join(results_dir, 'knn_model.joblib'))
     joblib.dump(scaler, os.path.join(results_dir, 'knn_scaler.joblib'))
     joblib.dump(pca, os.path.join(results_dir, 'knn_pca.joblib'))
+
+    # NEW: Save as .pt file for reuse without training
+    knn_model_path = save_trained_model_pt(best_knn, scaler, pca, 'knn', results_dir)
 
     # Save the actual parameters used
     params_used = best_knn.get_params()
@@ -1170,7 +1252,8 @@ def train_knn_model_conservative(X, y, feature_names=None, results_dir='results'
         'roc_auc': roc_auc,
         'performance_results': performance_results,
         'learning_curve_data': learning_curve_data,
-        'train_accuracy': train_acc_final
+        'train_accuracy': train_acc_final,
+        'model_path': knn_model_path  # Added model path
     }
 
 
@@ -1299,10 +1382,13 @@ def train_neural_network_model(X, y, feature_names=None, results_dir='results'):
         plt.close()
         print(f"✓ Neural Network training history saved to: {history_path}")
 
-    # Save model
+    # Save model (EXISTING CODE)
     joblib.dump(best_nn, os.path.join(results_dir, 'neural_network_model.joblib'))
     joblib.dump(scaler, os.path.join(results_dir, 'neural_network_scaler.joblib'))
     joblib.dump(pca, os.path.join(results_dir, 'neural_network_pca.joblib'))
+
+    # NEW: Save as .pt file for reuse without training
+    nn_model_path = save_trained_model_pt(best_nn, scaler, pca, 'neural_network', results_dir)
 
     # Save the architecture and parameters
     nn_info = pd.DataFrame({
@@ -1325,7 +1411,8 @@ def train_neural_network_model(X, y, feature_names=None, results_dir='results'):
         'balanced_accuracy': balanced_acc,
         'roc_auc': roc_auc,
         'performance_results': performance_results,
-        'learning_curve_data': learning_curve_data
+        'learning_curve_data': learning_curve_data,
+        'model_path': nn_model_path  # Added model path
     }
 
 
@@ -1399,9 +1486,12 @@ def train_random_forest_model_limited(X, y, feature_names=None, results_dir='res
         best_rf, X_train_pca, y_train_balanced, "Random Forest", results_dir
     )
 
-    # Save model
+    # Save model (EXISTING CODE)
     joblib.dump(best_rf, os.path.join(results_dir, 'random_forest_model.joblib'))
     joblib.dump(pca, os.path.join(results_dir, 'random_forest_pca.joblib'))
+
+    # NEW: Save as .pt file for reuse without training
+    rf_model_path = save_trained_model_pt(best_rf, None, pca, 'random_forest', results_dir)
 
     return {
         'model': best_rf,
@@ -1410,7 +1500,8 @@ def train_random_forest_model_limited(X, y, feature_names=None, results_dir='res
         'balanced_accuracy': balanced_acc,
         'roc_auc': roc_auc,
         'performance_results': performance_results,
-        'learning_curve_data': learning_curve_data
+        'learning_curve_data': learning_curve_data,
+        'model_path': rf_model_path  # Added model path
     }
 
 
@@ -1436,7 +1527,8 @@ def compare_all_models_balanced(all_results, results_dir='results'):
                 'Train_Balanced_Accuracy': perf['train_balanced_acc'],
                 'Test_Balanced_Accuracy': perf['test_balanced_acc'],
                 'Balanced_Accuracy_Gap': perf['balanced_acc_gap'],
-                'Overfitting_Severity': perf['severity']
+                'Overfitting_Severity': perf['severity'],
+                'Model_Path': results.get('model_path', 'N/A')  # Added model path
             })
 
     if not comparison_data:
@@ -1542,8 +1634,87 @@ def compare_all_models_balanced(all_results, results_dir='results'):
     print(f"   Overfitting Gap: {best_model['Balanced_Accuracy_Gap']:.4f}")
     print(f"   Overall Score: {best_model['Score']:.4f}")
     print(f"   Severity: {best_model['Overfitting_Severity']}")
+    print(f"   Model saved at: {best_model['Model_Path']}")
 
     return comparison_df
+
+
+# ---------------------------- Simple Reuse Functions ----------------------------
+def create_reuse_instructions():
+    """Create instructions for reusing trained models"""
+    instructions = """
+    =====================================================================
+    HOW TO REUSE TRAINED MODELS WITHOUT RETRAINING
+    =====================================================================
+
+    Your trained models have been saved as .pt files in the 'results' folder.
+
+    To reuse any model without training:
+
+    1. LOAD THE TRAINED MODEL:
+    ```python
+    import torch
+
+    # Load the model
+    model_data = torch.load('results/svm_trained_model.pt')  # or any other model
+
+    # Get the components
+    model = model_data['model']           # Trained sklearn model
+    scaler = model_data['scaler']         # Scaler used (if any)
+    pca = model_data['pca']               # PCA used (if any)
+    model_type = model_data['model_type'] # Type of model
+    ```
+
+    2. PREPARE NEW DATA:
+    ```python
+    # Extract features from new images (same as training)
+    extractor = TeaLeafFeatureExtractor()
+    new_features = []  # Extract features same way as during training
+
+    # The new_features should have same shape as training data
+    ```
+
+    3. MAKE PREDICTIONS:
+    ```python
+    # Preprocess new features (same as during training)
+    if scaler is not None:
+        new_features = scaler.transform(new_features)
+    if pca is not None:
+        new_features = pca.transform(new_features)
+
+    # Make predictions
+    predictions = model.predict(new_features)
+    probabilities = model.predict_proba(new_features)  # if available
+    ```
+
+    4. AVAILABLE MODELS (.pt files):
+       - results/svm_trained_model.pt
+       - results/decision_tree_trained_model.pt
+       - results/knn_trained_model.pt
+       - results/neural_network_trained_model.pt
+       - results/random_forest_trained_model.pt
+
+    5. QUICK PREDICTION FUNCTION:
+    ```python
+    def quick_predict(model_path, features):
+        model_data = torch.load(model_path)
+        model = model_data['model']
+        scaler = model_data['scaler']
+        pca = model_data['pca']
+
+        if scaler: features = scaler.transform(features)
+        if pca: features = pca.transform(features)
+
+        return model.predict(features), model.predict_proba(features)
+    ```
+
+    No need to retrain! Just load and predict.
+    =====================================================================
+    """
+
+    with open('results/reuse_instructions.txt', 'w') as f:
+        f.write(instructions)
+    print("✓ Created reuse instructions: results/reuse_instructions.txt")
 
 
 # ---------------------------- Main Function ----------------------------
@@ -1749,6 +1920,28 @@ def main():
     if all_results:
         compare_all_models_balanced(all_results, 'results')
 
+    # Create reuse instructions
+    create_reuse_instructions()
+
+    # Show what .pt files were created
+    import glob
+    pt_files = glob.glob('results/*_trained_model.pt')
+
+    print("\n" + "=" * 70)
+    print(".PT FILES CREATED FOR REUSE WITHOUT TRAINING")
+    print("=" * 70)
+    print("\n✅ The following trained models are saved as .pt files:")
+    for pt_file in pt_files:
+        print(f"   - {os.path.basename(pt_file)}")
+
+    print("\n🔥 NO NEED TO RETRAIN! To reuse any model:")
+    print("   1. Load with: torch.load('results/model_name_trained_model.pt')")
+    print("   2. Get model, scaler, pca from the loaded dictionary")
+    print("   3. Preprocess new data (same as training)")
+    print("   4. Predict using model.predict()")
+
+    print("\n📖 Detailed instructions: results/reuse_instructions.txt")
+
     print("\n" + "=" * 70)
     print("TRAINING COMPLETED SUCCESSFULLY!")
     print("=" * 70)
@@ -1787,6 +1980,8 @@ def main():
     print("   - knn_final_params.csv (Final parameters used for KNN)")
     print("   - neural_network_training_history.png (NN training loss curve)")
     print("   - neural_network_architecture.csv (NN architecture details)")
+    print("   - *.pt files (Trained models for reuse without retraining)")
+    print("   - reuse_instructions.txt (How to reuse models)")
 
 
 if __name__ == "__main__":
