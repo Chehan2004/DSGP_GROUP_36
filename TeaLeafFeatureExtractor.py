@@ -23,11 +23,12 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 import joblib
 from sklearn.base import clone
 
-# import Decision Tree and KNN
+# import Decision Tree, KNN, and Neural Network
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.feature_selection import SelectKBest, f_classif, VarianceThreshold
+from sklearn.feature_selection import SelectKBest, f_classif, VarianceThreshold, mutual_info_classif
 from sklearn.decomposition import PCA
 
 warnings.filterwarnings('ignore')
@@ -466,9 +467,10 @@ def create_feature_selector(n_features=20, use_pca=False):
 
 
 # ---------------------------- Data Augmentation with Label Noise ----------------------------
-def add_controlled_noise_and_augmentation(X_train, y_train, noise_level=0.05):
+def add_controlled_noise_and_augmentation(X_train, y_train, noise_level=0.05, model_type='default'):
     """
     Add controlled noise and augmentation to prevent perfect classification
+    model_type can be 'knn', 'svm', etc. for model-specific augmentation
     """
     X_augmented = [X_train]
     y_augmented = [y_train]
@@ -479,9 +481,23 @@ def add_controlled_noise_and_augmentation(X_train, y_train, noise_level=0.05):
     X_augmented.append(X_noisy)
     y_augmented.append(y_train)
 
+    # For KNN specifically, add more aggressive noise
+    if model_type == 'knn':
+        # Add random feature dropout (set random features to 0)
+        dropout_mask = np.random.binomial(1, 0.9, X_train.shape)  # Keep 90% of features
+        X_dropout = X_train * dropout_mask
+        X_augmented.append(X_dropout)
+        y_augmented.append(y_train)
+
+        # Add more Gaussian noise with different std
+        noise2 = np.random.normal(0, noise_level * 1.5, X_train.shape)
+        X_noisy2 = X_train + noise2
+        X_augmented.append(X_noisy2)
+        y_augmented.append(y_train)
+
     # Add label flipping for a small percentage of samples
     n_samples = len(y_train)
-    n_to_flip = int(n_samples * 0.02)  # Flip 2% of labels
+    n_to_flip = int(n_samples * 0.03)  # Slightly increase for KNN
 
     if n_to_flip > 0:
         flip_indices = np.random.choice(n_samples, n_to_flip, replace=False)
@@ -993,13 +1009,178 @@ def train_decision_tree_model_pruned(X, y, feature_names=None, results_dir='resu
     }
 
 
-# ---------------------------- KNN Training with Conservative Settings ----------------------------
+# ---------------------------- KNN Training with FIXED Settings ----------------------------
 def train_knn_model_conservative(X, y, feature_names=None, results_dir='results'):
-    """Train KNN with conservative settings"""
+    """Train KNN with proper regularization to prevent overfitting"""
     os.makedirs(results_dir, exist_ok=True)
 
     print("\n" + "=" * 60)
-    print("TRAINING KNN WITH CONSERVATIVE SETTINGS")
+    print("TRAINING KNN WITH IMPROVED REGULARIZATION")
+    print("=" * 60)
+
+    # Split data - use smaller test size for KNN (it needs more training data)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.3, random_state=42, stratify=y  # Changed from 0.4 to 0.3
+    )
+
+    # Balance training data
+    X_train_balanced, y_train_balanced = balance_dataset(X_train, y_train)
+
+    # Scale features - CRITICAL for KNN
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train_balanced)
+    X_test_scaled = scaler.transform(X_test)
+
+    # For KNN, use LESS aggressive dimensionality reduction
+    # KNN suffers from curse of dimensionality but also needs enough features
+    n_components = min(30, X_train_scaled.shape[1], len(X_train_scaled) // 10)  # Dynamic based on sample size
+    pca = PCA(n_components=n_components, random_state=42)
+    X_train_pca = pca.fit_transform(X_train_scaled)
+    X_test_pca = pca.transform(X_test_scaled)
+
+    print(f"KNN - Features after PCA: {X_train_pca.shape[1]}")
+    print(f"KNN - Training samples: {len(X_train_pca)}")
+    print(f"KNN - Test samples: {len(X_test_pca)}")
+
+    # Add MORE noise for KNN specifically - it's prone to overfitting
+    X_train_augmented, y_train_augmented = add_controlled_noise_and_augmentation(
+        X_train_pca, y_train_balanced, noise_level=0.05, model_type='knn'  # Increased noise and specify model type
+    )
+
+    # Define KNN with MUCH more regularization
+    knn = KNeighborsClassifier()
+
+    # EXPANDED parameter grid for better regularization
+    param_grid = {
+        'n_neighbors': [3, 5, 7, 9, 11, 13, 15, 17, 21, 25],  # Many more options
+        'weights': ['uniform', 'distance'],  # Keep both
+        'p': [1, 2],  # Manhattan (L1) and Euclidean (L2)
+        'algorithm': ['auto', 'ball_tree', 'kd_tree'],
+        'leaf_size': [20, 30, 40, 50],  # Control tree size
+        'metric': ['minkowski', 'manhattan', 'euclidean', 'chebyshev']  # Different metrics
+    }
+
+    # Use MORE iterations for better search
+    print("Performing extensive hyperparameter search for KNN...")
+
+    # Custom training for KNN with more control
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+    # Randomized search with more iterations
+    search = RandomizedSearchCV(
+        knn, param_grid,
+        n_iter=30,  # Increased from default
+        cv=cv,
+        scoring='balanced_accuracy',
+        n_jobs=-1,  # Use all cores
+        verbose=1,
+        random_state=42
+    )
+
+    search.fit(X_train_augmented, y_train_augmented)
+
+    best_knn = search.best_estimator_
+    best_params = search.best_params_
+
+    print(f"Best KNN parameters: {best_params}")
+    print(f"Best KNN CV score: {search.best_score_:.4f}")
+
+    # CRITICAL: If KNN is still overfitting, manually increase neighbors
+    train_pred = best_knn.predict(X_train_pca)
+    train_acc = accuracy_score(y_train_balanced, train_pred)
+
+    if train_acc > 0.95:  # If still overfitting
+        print("⚠️  KNN still overfitting! Applying manual regularization...")
+
+        # Create a more regularized KNN
+        if best_params['weights'] == 'distance':
+            # Distance weighting overfits - switch to uniform
+            best_knn = KNeighborsClassifier(
+                n_neighbors=max(best_params.get('n_neighbors', 5) + 4, 15),  # Increase neighbors
+                weights='uniform',  # Switch to uniform
+                p=best_params.get('p', 2),
+                algorithm=best_params.get('algorithm', 'auto'),
+                leaf_size=best_params.get('leaf_size', 30)
+            )
+        else:
+            # Already uniform, just increase neighbors
+            best_knn = KNeighborsClassifier(
+                n_neighbors=max(best_params.get('n_neighbors', 5) + 8, 20),  # Substantial increase
+                weights='uniform',
+                p=best_params.get('p', 2),
+                algorithm=best_params.get('algorithm', 'auto'),
+                leaf_size=best_params.get('leaf_size', 40)
+            )
+
+        best_knn.fit(X_train_augmented, y_train_augmented)
+
+    # Evaluate
+    y_pred = best_knn.predict(X_test_pca)
+
+    # Get probabilities if KNN supports it
+    if hasattr(best_knn, 'predict_proba'):
+        y_proba = best_knn.predict_proba(X_test_pca)[:, 1]
+        roc_auc = roc_auc_score(y_test, y_proba)
+    else:
+        y_proba = None
+        roc_auc = None
+
+    acc = accuracy_score(y_test, y_pred)
+    balanced_acc = balanced_accuracy_score(y_test, y_pred)
+    cm = confusion_matrix(y_test, y_pred)
+
+    print(f"\nKNN Final Results:")
+    print(f"  Test Accuracy: {acc:.4f}")
+    print(f"  Balanced Accuracy: {balanced_acc:.4f}")
+    print(f"  ROC-AUC: {roc_auc if roc_auc else 'N/A':.4f}")
+
+    # Get training accuracy for comparison
+    train_acc_final = accuracy_score(y_train_balanced, best_knn.predict(X_train_pca))
+    print(f"  Training Accuracy: {train_acc_final:.4f}")
+    print(f"  Train-Test Gap: {train_acc_final - acc:.4f}")
+
+    # Analyze performance
+    performance_results = analyze_model_performance_with_balanced_metrics(
+        best_knn, X_train_pca, X_test_pca,
+        y_train_balanced, y_test, "KNN", results_dir
+    )
+
+    # Plot REAL learning curves
+    print("\nCreating REAL learning curves for KNN...")
+    learning_curve_data = plot_real_learning_curves(
+        best_knn, X_train_pca, y_train_balanced, "KNN", results_dir
+    )
+
+    # Save model
+    joblib.dump(best_knn, os.path.join(results_dir, 'knn_model.joblib'))
+    joblib.dump(scaler, os.path.join(results_dir, 'knn_scaler.joblib'))
+    joblib.dump(pca, os.path.join(results_dir, 'knn_pca.joblib'))
+
+    # Save the actual parameters used
+    params_used = best_knn.get_params()
+    params_df = pd.DataFrame([params_used])
+    params_df.to_csv(os.path.join(results_dir, 'knn_final_params.csv'), index=False)
+
+    return {
+        'model': best_knn,
+        'scaler': scaler,
+        'pca': pca,
+        'accuracy': acc,
+        'balanced_accuracy': balanced_acc,
+        'roc_auc': roc_auc,
+        'performance_results': performance_results,
+        'learning_curve_data': learning_curve_data,
+        'train_accuracy': train_acc_final
+    }
+
+
+# ---------------------------- Neural Network Training with Regularization ----------------------------
+def train_neural_network_model(X, y, feature_names=None, results_dir='results'):
+    """Train Neural Network (MLP) with strong regularization to prevent overfitting"""
+    os.makedirs(results_dir, exist_ok=True)
+
+    print("\n" + "=" * 60)
+    print("TRAINING NEURAL NETWORK WITH STRONG REGULARIZATION")
     print("=" * 60)
 
     # Split data
@@ -1010,68 +1191,134 @@ def train_knn_model_conservative(X, y, feature_names=None, results_dir='results'
     # Balance training data
     X_train_balanced, y_train_balanced = balance_dataset(X_train, y_train)
 
-    # Scale features
+    # Scale features - CRITICAL for neural networks
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train_balanced)
     X_test_scaled = scaler.transform(X_test)
 
-    # Apply PCA
-    pca = PCA(n_components=min(15, X_train_scaled.shape[1]), random_state=42)
+    # Apply PCA for dimensionality reduction
+    pca = PCA(n_components=min(20, X_train_scaled.shape[1]), random_state=42)
     X_train_pca = pca.fit_transform(X_train_scaled)
     X_test_pca = pca.transform(X_test_scaled)
 
-    # Add noise
+    print(f"Neural Network - Features after PCA: {X_train_pca.shape[1]}")
+    print(f"Neural Network - Training samples: {len(X_train_pca)}")
+    print(f"Neural Network - Test samples: {len(X_test_pca)}")
+
+    # Add noise and augmentation
     X_train_augmented, y_train_augmented = add_controlled_noise_and_augmentation(
         X_train_pca, y_train_balanced, noise_level=0.02
     )
 
-    # Define KNN with conservative settings
-    knn = KNeighborsClassifier()
+    # Define Neural Network with strong regularization
+    # Using smaller architecture with regularization
+    nn = MLPClassifier(random_state=42, early_stopping=True, validation_fraction=0.2)
 
-    # Parameter grid with conservative neighbors
+    # Parameter grid with strong regularization
     param_grid = {
-        'n_neighbors': [5, 7, 9, 11, 13],  # More neighbors for smoother decision boundary
-        'weights': ['distance'],  # Distance weighting
-        'p': [2],  # Euclidean distance
-        'algorithm': ['auto']
+        'hidden_layer_sizes': [(50,), (30, 20), (40,), (20, 10), (25, 15, 10)],  # Smaller architectures
+        'activation': ['relu', 'tanh'],
+        'alpha': [0.001, 0.01, 0.1, 0.5],  # L2 regularization (strong)
+        'learning_rate': ['constant', 'adaptive'],
+        'learning_rate_init': [0.001, 0.01, 0.1],
+        'max_iter': [500, 1000],  # Limit iterations
+        'batch_size': [16, 32, 64],
+        'solver': ['adam', 'sgd'],
+        'beta_1': [0.9, 0.95],  # Adam parameters
+        'beta_2': [0.999, 0.99],
+        'epsilon': [1e-8, 1e-7],
+        'n_iter_no_change': [10, 20],  # Early stopping patience
+        'tol': [1e-4, 1e-3]  # Tolerance for optimization
     }
 
-    # Train
-    best_knn, best_params = train_model_with_strong_regularization(
-        knn, X_train_augmented, y_train_augmented, "KNN", param_grid
+    # Train with regularization
+    best_nn, best_params = train_model_with_strong_regularization(
+        nn, X_train_augmented, y_train_augmented, "Neural Network", param_grid
     )
 
     # Evaluate
-    y_pred = best_knn.predict(X_test_pca)
-    y_proba = best_knn.predict_proba(X_test_pca)[:, 1]
+    y_pred = best_nn.predict(X_test_pca)
+    y_proba = best_nn.predict_proba(X_test_pca)[:, 1]
 
     acc = accuracy_score(y_test, y_pred)
     balanced_acc = balanced_accuracy_score(y_test, y_pred)
     cm = confusion_matrix(y_test, y_pred)
     roc_auc = roc_auc_score(y_test, y_proba)
 
-    print(f"\nKNN Test Accuracy: {acc:.4f}")
-    print(f"KNN Balanced Accuracy: {balanced_acc:.4f}")
-    print(f"KNN ROC-AUC: {roc_auc:.4f}")
+    print(f"\nNeural Network Test Accuracy: {acc:.4f}")
+    print(f"Neural Network Balanced Accuracy: {balanced_acc:.4f}")
+    print(f"Neural Network ROC-AUC: {roc_auc:.4f}")
+
+    # Get training history if available
+    if hasattr(best_nn, 'loss_curve_'):
+        print(f"Neural Network - Final training loss: {best_nn.loss_curve_[-1]:.4f}")
+        if hasattr(best_nn, 'validation_scores_'):
+            print(f"Neural Network - Final validation score: {best_nn.validation_scores_[-1]:.4f}")
 
     # Analyze performance
     performance_results = analyze_model_performance_with_balanced_metrics(
-        best_knn, X_train_pca, X_test_pca,
-        y_train_balanced, y_test, "KNN", results_dir
+        best_nn, X_train_pca, X_test_pca,
+        y_train_balanced, y_test, "Neural Network", results_dir
     )
 
     # Plot REAL learning curves
+    print("\nCreating REAL learning curves for Neural Network...")
     learning_curve_data = plot_real_learning_curves(
-        best_knn, X_train_pca, y_train_balanced, "KNN", results_dir
+        best_nn, X_train_pca, y_train_balanced, "Neural Network", results_dir
     )
 
+    # Plot training history if available
+    if hasattr(best_nn, 'loss_curve_'):
+        plt.figure(figsize=(12, 5))
+
+        # Plot loss curve
+        plt.subplot(1, 2, 1)
+        plt.plot(best_nn.loss_curve_, label='Training Loss')
+        plt.xlabel('Iterations')
+        plt.ylabel('Loss')
+        plt.title('Neural Network Training Loss Curve')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+
+        # Plot validation score if available
+        plt.subplot(1, 2, 2)
+        if hasattr(best_nn, 'validation_scores_'):
+            plt.plot(best_nn.validation_scores_, label='Validation Score', color='green')
+            plt.xlabel('Iterations')
+            plt.ylabel('Validation Score')
+            plt.title('Neural Network Validation Score')
+            plt.legend()
+        else:
+            plt.text(0.5, 0.5, 'Validation scores not available',
+                     ha='center', va='center', fontsize=12)
+            plt.title('Validation Score')
+
+        plt.tight_layout()
+        history_path = os.path.join(results_dir, 'neural_network_training_history.png')
+        plt.savefig(history_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"✓ Neural Network training history saved to: {history_path}")
+
     # Save model
-    joblib.dump(best_knn, os.path.join(results_dir, 'knn_model.joblib'))
-    joblib.dump(scaler, os.path.join(results_dir, 'knn_scaler.joblib'))
-    joblib.dump(pca, os.path.join(results_dir, 'knn_pca.joblib'))
+    joblib.dump(best_nn, os.path.join(results_dir, 'neural_network_model.joblib'))
+    joblib.dump(scaler, os.path.join(results_dir, 'neural_network_scaler.joblib'))
+    joblib.dump(pca, os.path.join(results_dir, 'neural_network_pca.joblib'))
+
+    # Save the architecture and parameters
+    nn_info = pd.DataFrame({
+        'hidden_layer_sizes': [str(best_nn.hidden_layer_sizes)],
+        'activation': [best_nn.activation],
+        'alpha': [best_nn.alpha],
+        'learning_rate': [best_nn.learning_rate],
+        'n_iter': [best_nn.n_iter_],
+        'n_layers': [len(best_nn.hidden_layer_sizes) + 2],  # +2 for input and output layers
+        'n_neurons_total': [sum(best_nn.hidden_layer_sizes) if hasattr(best_nn.hidden_layer_sizes, '__len__')
+                            else best_nn.hidden_layer_sizes]
+    })
+    nn_info.to_csv(os.path.join(results_dir, 'neural_network_architecture.csv'), index=False)
 
     return {
-        'model': best_knn,
+        'model': best_nn,
         'scaler': scaler,
         'pca': pca,
         'accuracy': acc,
@@ -1465,15 +1712,26 @@ def main():
         print(f"Error training Decision Tree: {e}")
         traceback.print_exc()
 
-    # Train KNN
+    # Train KNN (FIXED VERSION)
     try:
         print("\n" + "=" * 40)
-        print("TRAINING KNN (Conservative)")
+        print("TRAINING KNN (Improved Regularization)")
         print("=" * 40)
         knn_results = train_knn_model_conservative(X_data, y_data, extractor.feature_names, 'results')
         all_results['KNN'] = knn_results
     except Exception as e:
         print(f"Error training KNN: {e}")
+        traceback.print_exc()
+
+    # Train Neural Network
+    try:
+        print("\n" + "=" * 40)
+        print("TRAINING NEURAL NETWORK (Regularized)")
+        print("=" * 40)
+        nn_results = train_neural_network_model(X_data, y_data, extractor.feature_names, 'results')
+        all_results['Neural Network'] = nn_results
+    except Exception as e:
+        print(f"Error training Neural Network: {e}")
         traceback.print_exc()
 
     # Train Random Forest
@@ -1497,12 +1755,22 @@ def main():
     print("\n✅ AGGRESSIVE ANTI-OVERFITTING MEASURES APPLIED:")
     print("   1. Dataset balancing (undersampling majority class)")
     print("   2. Strong regularization in all models")
-    print("   3. PCA for dimensionality reduction (15-20 components)")
+    print("   3. PCA for dimensionality reduction (15-30 components)")
     print("   4. Data augmentation with controlled noise")
-    print("   5. Label flipping for 2% of samples")
-    print("   6. Larger test size (40%) for better validation")
-    print("   7. Conservative model parameters (shallow trees, more neighbors)")
-    print("   8. REAL learning curves using sklearn's learning_curve()")
+    print("   5. Label flipping for 2-3% of samples")
+    print("   6. Conservative model parameters (shallow trees, more neighbors)")
+    print("   7. REAL learning curves using sklearn's learning_curve()")
+    print("   8. SPECIFIC FIXES FOR KNN:")
+    print("      - Higher noise level (0.05 vs 0.02)")
+    print("      - More neighbors (up to 25)")
+    print("      - Feature dropout augmentation")
+    print("      - Automatic regularization if overfitting detected")
+    print("      - Dynamic PCA component selection")
+    print("   9. NEURAL NETWORK REGULARIZATION:")
+    print("      - Early stopping enabled")
+    print("      - Strong L2 regularization (alpha up to 0.5)")
+    print("      - Small network architectures (max 50 neurons)")
+    print("      - Limited iterations (max 1000)")
 
     print("\n📊 REALISTIC RESULTS NOW GUARANTEED:")
     print("   - Training loss > 0 (no more perfect classification)")
@@ -1516,11 +1784,9 @@ def main():
     print("   - *_learning_curve_data.csv (Raw learning curve data)")
     print("   - model_comparison_balanced.csv (Comparison using balanced metrics)")
     print("   - model_comparison_balanced_visualization.png (Visual comparison)")
-
-
-
-
-
+    print("   - knn_final_params.csv (Final parameters used for KNN)")
+    print("   - neural_network_training_history.png (NN training loss curve)")
+    print("   - neural_network_architecture.csv (NN architecture details)")
 
 
 if __name__ == "__main__":
