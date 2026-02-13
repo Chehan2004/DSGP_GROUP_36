@@ -4,9 +4,9 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4d9fde26-7e08-494b-8ce6-d9fe44a85098" name="Changes" comment="add machine learning models">
-      <change afterPath="$PROJECT_DIR$/DeepLearningModelSelection.ipynb" afterDir="false" />
+    <list default="true" id="4d9fde26-7e08-494b-8ce6-d9fe44a85098" name="Changes" comment="add deep learning models">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/DeepLearningModelSelection.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/DeepLearningModelSelection.ipynb" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -16,8 +16,8 @@
   <component name="FileTemplateManagerImpl">
     <option name="RECENT_TEMPLATES">
       <list>
-        <option value="Python Script" />
         <option value="Jupyter Notebook" />
+        <option value="Python Script" />
       </list>
     </option>
   </component>
@@ -54,6 +54,7 @@
     &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
     &quot;Python.Step1_IdentificationOfData.executor&quot;: &quot;Run&quot;,
     &quot;Python.TeaLeafFeatureExtractor.executor&quot;: &quot;Run&quot;,
+    &quot;Python.checkgpu.executor&quot;: &quot;Run&quot;,
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
@@ -96,7 +97,18 @@
       <workItem from="1769747471986" duration="11000" />
       <workItem from="1769941323051" duration="4675000" />
       <workItem from="1769953858264" duration="8123000" />
-      <workItem from="1769964400977" duration="3956000" />
+      <workItem from="1769964400977" duration="4686000" />
+      <workItem from="1770001334092" duration="5125000" />
+      <workItem from="1770008121363" duration="4309000" />
+      <workItem from="1770027750226" duration="116000" />
+      <workItem from="1770462428511" duration="4409000" />
+      <workItem from="1770487479692" duration="1699000" />
+      <workItem from="1770552369537" duration="13776000" />
+      <workItem from="1770596077587" duration="12388000" />
+      <workItem from="1770799744300" duration="133000" />
+      <workItem from="1770957678028" duration="13168000" />
+      <workItem from="1770979184054" duration="6463000" />
+      <workItem from="1771013577359" duration="2264000" />
     </task>
     <task id="LOCAL-00001" summary="Adding Initial Identification,augmentation and EDA">
       <option name="closed" value="true" />
@@ -114,7 +126,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769951661326</updated>
     </task>
-    <option name="localTasksCounter" value="3" />
+    <task id="LOCAL-00003" summary="add deep learning models">
+      <option name="closed" value="true" />
+      <created>1769972950852</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1769972950852</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -134,9 +154,11 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Adding Initial Identification,augmentation and EDA" />
     <MESSAGE value="add machine learning models" />
-    <option name="LAST_COMMIT_MESSAGE" value="add machine learning models" />
+    <MESSAGE value="add deep learning models" />
+    <option name="LAST_COMMIT_MESSAGE" value="add deep learning models" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
+    <SUITE FILE_PATH="coverage/DSGP_GROUP_36$checkgpu.coverage" NAME="checkgpu Coverage Results" MODIFIED="1770957708584" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/Initial Identification and augmentation" />
     <SUITE FILE_PATH="coverage/DSGP_GROUP_36$Step1_IdentificationOfData.coverage" NAME="Step1_IdentificationOfData Coverage Results" MODIFIED="1769949002524" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/Initial Identification and augmentation" />
   </component>
 </project>
