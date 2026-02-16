@@ -4,7 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="4d9fde26-7e08-494b-8ce6-d9fe44a85098" name="Changes" comment="add deep learning models">
+    <list default="true" id="4d9fde26-7e08-494b-8ce6-d9fe44a85098" name="Changes" comment="trained deep learning models with newly augmented data">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/DeepLearningModelSelection.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/DeepLearningModelSelection.ipynb" afterDir="false" />
     </list>
@@ -108,7 +108,9 @@
       <workItem from="1770799744300" duration="133000" />
       <workItem from="1770957678028" duration="13168000" />
       <workItem from="1770979184054" duration="6463000" />
-      <workItem from="1771013577359" duration="2264000" />
+      <workItem from="1771013577359" duration="2530000" />
+      <workItem from="1771147322668" duration="5634000" />
+      <workItem from="1771228573638" duration="601000" />
     </task>
     <task id="LOCAL-00001" summary="Adding Initial Identification,augmentation and EDA">
       <option name="closed" value="true" />
@@ -134,7 +136,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769972950852</updated>
     </task>
-    <option name="localTasksCounter" value="4" />
+    <task id="LOCAL-00004" summary="trained deep learning models with newly augmented data">
+      <option name="closed" value="true" />
+      <created>1771015901366</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1771015901366</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -155,7 +165,8 @@
     <MESSAGE value="Adding Initial Identification,augmentation and EDA" />
     <MESSAGE value="add machine learning models" />
     <MESSAGE value="add deep learning models" />
-    <option name="LAST_COMMIT_MESSAGE" value="add deep learning models" />
+    <MESSAGE value="trained deep learning models with newly augmented data" />
+    <option name="LAST_COMMIT_MESSAGE" value="trained deep learning models with newly augmented data" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/DSGP_GROUP_36$checkgpu.coverage" NAME="checkgpu Coverage Results" MODIFIED="1770957708584" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/Initial Identification and augmentation" />
