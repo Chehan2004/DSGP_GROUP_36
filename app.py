@@ -28,9 +28,9 @@ def predict():
     fertilizer = le_fert.inverse_transform([prediction[0]])[0]
     dosage = le_dose.inverse_transform([prediction[1]])[0]
 
-    print("RAW prediction:", prediction)
-    print("Decoded fertilizer:", fertilizer)
-    print("Decoded dosage:", dosage)
+    # print("RAW prediction:", prediction)
+    # print("Decoded fertilizer:", fertilizer)
+    # print("Decoded dosage:", dosage)
 
     # Convert to strings
     fertilizer = str(fertilizer)
