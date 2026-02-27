@@ -2290,7 +2290,7 @@ def load_validation_images(validation_folder, extractor, label=None):
     """
     Load images from validation folder.
     If label is provided, all images are assigned that label (e.g., for single-class folder).
-    Otherwise expects subfolders 'tea_leaves' (label=1) and 'non_tea' (label=0).
+    Otherwise expects subfolders known for tea (e.g., 'tea_leaves', 'tea_leaves_test') and non-tea (e.g., 'non_tea', 'non_tea_test').
     If no images found, checks for exactly one subfolder and loads images from there (unknown labels).
     """
     images_data = []
@@ -2322,34 +2322,51 @@ def load_validation_images(validation_folder, extractor, label=None):
         print(f"   Loaded {len(images_data)} images.")
         return images_data
 
-    # Otherwise try to load from subfolders 'tea_leaves' and 'non_tea'
+    # Otherwise try to load from known subfolders
+    tea_subfolders = ['tea_leaves', 'tea_leaves_test']
+    non_tea_subfolders = ['non_tea', 'non_tea_test']
+
     subfolders_found = False
-    for subfolder, lbl in [('tea_leaves', 1), ('non_tea', 0)]:
+    # Iterate over all subdirectories in validation_folder
+    for subfolder in os.listdir(validation_folder):
         folder_path = os.path.join(validation_folder, subfolder)
-        if os.path.exists(folder_path):
+        if not os.path.isdir(folder_path):
+            continue
+
+        if subfolder in tea_subfolders:
+            lbl = 1
+            folder_type = "tea leaves"
             subfolders_found = True
-            print(f"Loading images from '{subfolder}' (label={lbl})...")
-            for fname in sorted(os.listdir(folder_path)):
-                if fname.lower().endswith(valid_extensions):
-                    img_path = os.path.join(folder_path, fname)
-                    img = cv2.imread(img_path)
-                    if img is None:
-                        continue
-                    img = cv2.resize(img, extractor.image_size)
-                    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                    img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-                    img_lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-                    img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                    images_data.append({
-                        'rgb': img_rgb, 'hsv': img_hsv, 'lab': img_lab, 'gray': img_gray,
-                        'label': lbl, 'filename': fname
-                    })
+        elif subfolder in non_tea_subfolders:
+            lbl = 0
+            folder_type = "non-tea"
+            subfolders_found = True
+        else:
+            # Skip unknown subfolders (do not treat them as labeled data)
+            continue
+
+        print(f"Loading images from '{subfolder}' (label={lbl}, {folder_type})...")
+        for fname in sorted(os.listdir(folder_path)):
+            if fname.lower().endswith(valid_extensions):
+                img_path = os.path.join(folder_path, fname)
+                img = cv2.imread(img_path)
+                if img is None:
+                    continue
+                img = cv2.resize(img, extractor.image_size)
+                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+                img_lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+                img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                images_data.append({
+                    'rgb': img_rgb, 'hsv': img_hsv, 'lab': img_lab, 'gray': img_gray,
+                    'label': lbl, 'filename': fname
+                })
 
     if subfolders_found:
-        print(f"✅ Total validation images loaded from subfolders: {len(images_data)}")
+        print(f"✅ Total validation images loaded from known subfolders: {len(images_data)}")
         return images_data
 
-    # No subfolders found, try loading images directly from validation_folder
+    # No known subfolders found; try loading images directly from validation_folder
     direct_images = []
     for fname in sorted(os.listdir(validation_folder)):
         if fname.lower().endswith(valid_extensions):
@@ -2479,9 +2496,13 @@ def validate_models(validation_folder='validation', results_dir='results'):
                 acc = accuracy_score(val_labels, y_pred)
                 balanced_acc = balanced_accuracy_score(val_labels, y_pred)
                 cm = confusion_matrix(val_labels, y_pred)
+
+                # Generate classification report with explicit labels to handle single-class cases
                 report = classification_report(val_labels, y_pred,
+                                               labels=[0, 1],
                                                target_names=['non_tea', 'tea'],
-                                               output_dict=True)
+                                               output_dict=True,
+                                               zero_division=0)
 
                 print(f"   Accuracy: {acc:.4f}")
                 print(f"   Balanced Accuracy: {balanced_acc:.4f}")
@@ -2509,8 +2530,10 @@ def validate_models(validation_folder='validation', results_dir='results'):
                     'model': model_name,
                     'accuracy': acc,
                     'balanced_accuracy': balanced_acc,
-                    'tn': cm[0,0], 'fp': cm[0,1],
-                    'fn': cm[1,0], 'tp': cm[1,1],
+                    'tn': cm[0,0] if cm.shape[0] > 0 and cm.shape[1] > 0 else 0,
+                    'fp': cm[0,1] if cm.shape[0] > 0 and cm.shape[1] > 1 else 0,
+                    'fn': cm[1,0] if cm.shape[0] > 1 and cm.shape[1] > 0 else 0,
+                    'tp': cm[1,1] if cm.shape[0] > 1 and cm.shape[1] > 1 else 0,
                     'precision_tea': report['tea']['precision'],
                     'recall_tea': report['tea']['recall'],
                     'f1_tea': report['tea']['f1-score'],
