@@ -13,6 +13,7 @@ import seaborn as sns
 from sklearn.ensemble import RandomForestClassifier
 import warnings
 import traceback
+import glob  # for validation
 
 # imports for SVM and utilities
 from sklearn.svm import SVC
@@ -23,12 +24,18 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 import joblib
 from sklearn.base import clone
 
-# import Decision Tree and KNN
+# import Decision Tree, KNN, and Neural Network
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
+from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.feature_selection import SelectKBest, f_classif, VarianceThreshold
+from sklearn.feature_selection import SelectKBest, f_classif, VarianceThreshold, mutual_info_classif
 from sklearn.decomposition import PCA
+
+# Import torch for .pt file creation
+import torch
+import torch.nn as nn
+import pickle
 
 warnings.filterwarnings('ignore')
 
@@ -466,9 +473,10 @@ def create_feature_selector(n_features=20, use_pca=False):
 
 
 # ---------------------------- Data Augmentation with Label Noise ----------------------------
-def add_controlled_noise_and_augmentation(X_train, y_train, noise_level=0.05):
+def add_controlled_noise_and_augmentation(X_train, y_train, noise_level=0.05, model_type='default'):
     """
     Add controlled noise and augmentation to prevent perfect classification
+    model_type can be 'knn', 'svm', etc. for model-specific augmentation
     """
     X_augmented = [X_train]
     y_augmented = [y_train]
@@ -479,9 +487,23 @@ def add_controlled_noise_and_augmentation(X_train, y_train, noise_level=0.05):
     X_augmented.append(X_noisy)
     y_augmented.append(y_train)
 
+    # For KNN specifically, add more aggressive noise
+    if model_type == 'knn':
+        # Add random feature dropout (set random features to 0)
+        dropout_mask = np.random.binomial(1, 0.9, X_train.shape)  # Keep 90% of features
+        X_dropout = X_train * dropout_mask
+        X_augmented.append(X_dropout)
+        y_augmented.append(y_train)
+
+        # Add more Gaussian noise with different std
+        noise2 = np.random.normal(0, noise_level * 1.5, X_train.shape)
+        X_noisy2 = X_train + noise2
+        X_augmented.append(X_noisy2)
+        y_augmented.append(y_train)
+
     # Add label flipping for a small percentage of samples
     n_samples = len(y_train)
-    n_to_flip = int(n_samples * 0.02)  # Flip 2% of labels
+    n_to_flip = int(n_samples * 0.03)  # Slightly increase for KNN
 
     if n_to_flip > 0:
         flip_indices = np.random.choice(n_samples, n_to_flip, replace=False)
@@ -790,6 +812,79 @@ def analyze_model_performance_with_balanced_metrics(model, X_train, X_test, y_tr
     }
 
 
+# ---------------------------- Model Saving Functions ----------------------------
+def save_trained_model_pt(model, scaler=None, pca=None, model_type='model', results_dir='results'):
+    """Save trained model as .pt file for reuse without training"""
+    os.makedirs(results_dir, exist_ok=True)
+
+    model_data = {
+        'model': model,
+        'model_type': model_type,
+        'model_class': model.__class__.__name__,
+        'model_params': model.get_params(),
+        'scaler': scaler,
+        'pca': pca,
+        'classes': model.classes_ if hasattr(model, 'classes_') else None,
+        'n_features_in': model.n_features_in_ if hasattr(model, 'n_features_in_') else None,
+        'feature_names': None,  # Can be added if available
+        'timestamp': pd.Timestamp.now().isoformat(),
+        'description': f'Trained {model_type} model for tea leaf classification'
+    }
+
+    filename = os.path.join(results_dir, f'{model_type}_trained_model.pt')
+    torch.save(model_data, filename)
+    print(f"✓ Saved trained model to: {filename}")
+
+    return filename
+
+
+def load_trained_model_pt(model_path):
+    """Load a trained model from .pt file"""
+    if not os.path.exists(model_path):
+        print(f"Error: Model file {model_path} does not exist!")
+        return None
+
+    try:
+        # FIX: Use weights_only=False for PyTorch 2.6+ compatibility
+        model_data = torch.load(model_path, weights_only=False)
+        print(f"✓ Loaded trained model: {model_data.get('model_type', 'Unknown')}")
+        return model_data
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        # Try with weights_only=False if not already tried
+        try:
+            model_data = torch.load(model_path, weights_only=False)
+            return model_data
+        except Exception as e2:
+            print(f"Alternative loading also failed: {e2}")
+            return None
+
+
+def predict_with_trained_model(model_data, features):
+    """Make predictions using a loaded trained model"""
+    if not model_data:
+        return None
+
+    model = model_data['model']
+    scaler = model_data['scaler']
+    pca = model_data['pca']
+
+    # Apply preprocessing if available
+    if scaler is not None:
+        features = scaler.transform(features)
+    if pca is not None:
+        features = pca.transform(features)
+
+    # Make predictions
+    predictions = model.predict(features)
+    probabilities = None
+
+    if hasattr(model, 'predict_proba'):
+        probabilities = model.predict_proba(features)
+
+    return predictions, probabilities
+
+
 # ---------------------------- SVM Training with Strong Regularization ----------------------------
 def train_svm_model_balanced(X, y, feature_names=None, results_dir='results'):
     """Train SVM model with balanced data and strong regularization"""
@@ -872,10 +967,13 @@ def train_svm_model_balanced(X, y, feature_names=None, results_dir='results'):
         best_svm, X_train_pca, y_train_balanced, "SVM", results_dir
     )
 
-    # Save model and components
+    # Save model and components (EXISTING CODE)
     joblib.dump(best_svm, os.path.join(results_dir, 'svm_model.joblib'))
     joblib.dump(scaler, os.path.join(results_dir, 'svm_scaler.joblib'))
     joblib.dump(pca, os.path.join(results_dir, 'svm_pca.joblib'))
+
+    # NEW: Save as .pt file for reuse without training
+    svm_model_path = save_trained_model_pt(best_svm, scaler, pca, 'svm', results_dir)
 
     # Save predictions
     preds_df = pd.DataFrame({
@@ -897,7 +995,8 @@ def train_svm_model_balanced(X, y, feature_names=None, results_dir='results'):
         'balanced_accuracy': balanced_acc,
         'roc_auc': roc_auc,
         'performance_results': performance_results,
-        'learning_curve_data': learning_curve_data
+        'learning_curve_data': learning_curve_data,
+        'model_path': svm_model_path  # Added model path
     }
 
 
@@ -970,9 +1069,12 @@ def train_decision_tree_model_pruned(X, y, feature_names=None, results_dir='resu
         best_dt, X_train_pca, y_train_balanced, "Decision Tree", results_dir
     )
 
-    # Save model
+    # Save model (EXISTING CODE)
     joblib.dump(best_dt, os.path.join(results_dir, 'decision_tree_model.joblib'))
     joblib.dump(pca, os.path.join(results_dir, 'decision_tree_pca.joblib'))
+
+    # NEW: Save as .pt file for reuse without training
+    dt_model_path = save_trained_model_pt(best_dt, None, pca, 'decision_tree', results_dir)
 
     # Save tree depth info
     tree_info = pd.DataFrame({
@@ -989,17 +1091,187 @@ def train_decision_tree_model_pruned(X, y, feature_names=None, results_dir='resu
         'balanced_accuracy': balanced_acc,
         'roc_auc': roc_auc,
         'performance_results': performance_results,
-        'learning_curve_data': learning_curve_data
+        'learning_curve_data': learning_curve_data,
+        'model_path': dt_model_path  # Added model path
     }
 
 
-# ---------------------------- KNN Training with Conservative Settings ----------------------------
+# ---------------------------- KNN Training with FIXED Settings ----------------------------
 def train_knn_model_conservative(X, y, feature_names=None, results_dir='results'):
-    """Train KNN with conservative settings"""
+    """Train KNN with proper regularization to prevent overfitting"""
     os.makedirs(results_dir, exist_ok=True)
 
     print("\n" + "=" * 60)
-    print("TRAINING KNN WITH CONSERVATIVE SETTINGS")
+    print("TRAINING KNN WITH IMPROVED REGULARIZATION")
+    print("=" * 60)
+
+    # Split data - use smaller test size for KNN (it needs more training data)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.3, random_state=42, stratify=y  # Changed from 0.4 to 0.3
+    )
+
+    # Balance training data
+    X_train_balanced, y_train_balanced = balance_dataset(X_train, y_train)
+
+    # Scale features - CRITICAL for KNN
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train_balanced)
+    X_test_scaled = scaler.transform(X_test)
+
+    # For KNN, use LESS aggressive dimensionality reduction
+    # KNN suffers from curse of dimensionality but also needs enough features
+    n_components = min(30, X_train_scaled.shape[1], len(X_train_scaled) // 10)  # Dynamic based on sample size
+    pca = PCA(n_components=n_components, random_state=42)
+    X_train_pca = pca.fit_transform(X_train_scaled)
+    X_test_pca = pca.transform(X_test_scaled)
+
+    print(f"KNN - Features after PCA: {X_train_pca.shape[1]}")
+    print(f"KNN - Training samples: {len(X_train_pca)}")
+    print(f"KNN - Test samples: {len(X_test_pca)}")
+
+    # Add MORE noise for KNN specifically - it's prone to overfitting
+    X_train_augmented, y_train_augmented = add_controlled_noise_and_augmentation(
+        X_train_pca, y_train_balanced, noise_level=0.05, model_type='knn'  # Increased noise and specify model type
+    )
+
+    # Define KNN with MUCH more regularization
+    knn = KNeighborsClassifier()
+
+    # EXPANDED parameter grid for better regularization
+    param_grid = {
+        'n_neighbors': [3, 5, 7, 9, 11, 13, 15, 17, 21, 25],  # Many more options
+        'weights': ['uniform', 'distance'],  # Keep both
+        'p': [1, 2],  # Manhattan (L1) and Euclidean (L2)
+        'algorithm': ['auto', 'ball_tree', 'kd_tree'],
+        'leaf_size': [20, 30, 40, 50],  # Control tree size
+        'metric': ['minkowski', 'manhattan', 'euclidean', 'chebyshev']  # Different metrics
+    }
+
+    # Use MORE iterations for better search
+    print("Performing extensive hyperparameter search for KNN...")
+
+    # Custom training for KNN with more control
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+    # Randomized search with more iterations
+    search = RandomizedSearchCV(
+        knn, param_grid,
+        n_iter=30,  # Increased from default
+        cv=cv,
+        scoring='balanced_accuracy',
+        n_jobs=-1,  # Use all cores
+        verbose=1,
+        random_state=42
+    )
+
+    search.fit(X_train_augmented, y_train_augmented)
+
+    best_knn = search.best_estimator_
+    best_params = search.best_params_
+
+    print(f"Best KNN parameters: {best_params}")
+    print(f"Best KNN CV score: {search.best_score_:.4f}")
+
+    # CRITICAL: If KNN is still overfitting, manually increase neighbors
+    train_pred = best_knn.predict(X_train_pca)
+    train_acc = accuracy_score(y_train_balanced, train_pred)
+
+    if train_acc > 0.95:  # If still overfitting
+        print("⚠️  KNN still overfitting! Applying manual regularization...")
+
+        # Create a more regularized KNN
+        if best_params['weights'] == 'distance':
+            # Distance weighting overfits - switch to uniform
+            best_knn = KNeighborsClassifier(
+                n_neighbors=max(best_params.get('n_neighbors', 5) + 4, 15),  # Increase neighbors
+                weights='uniform',  # Switch to uniform
+                p=best_params.get('p', 2),
+                algorithm=best_params.get('algorithm', 'auto'),
+                leaf_size=best_params.get('leaf_size', 30)
+            )
+        else:
+            # Already uniform, just increase neighbors
+            best_knn = KNeighborsClassifier(
+                n_neighbors=max(best_params.get('n_neighbors', 5) + 8, 20),  # Substantial increase
+                weights='uniform',
+                p=best_params.get('p', 2),
+                algorithm=best_params.get('algorithm', 'auto'),
+                leaf_size=best_params.get('leaf_size', 40)
+            )
+
+        best_knn.fit(X_train_augmented, y_train_augmented)
+
+    # Evaluate
+    y_pred = best_knn.predict(X_test_pca)
+
+    # Get probabilities if KNN supports it
+    if hasattr(best_knn, 'predict_proba'):
+        y_proba = best_knn.predict_proba(X_test_pca)[:, 1]
+        roc_auc = roc_auc_score(y_test, y_proba)
+    else:
+        y_proba = None
+        roc_auc = None
+
+    acc = accuracy_score(y_test, y_pred)
+    balanced_acc = balanced_accuracy_score(y_test, y_pred)
+    cm = confusion_matrix(y_test, y_pred)
+
+    print(f"\nKNN Final Results:")
+    print(f"  Test Accuracy: {acc:.4f}")
+    print(f"  Balanced Accuracy: {balanced_acc:.4f}")
+    print(f"  ROC-AUC: {roc_auc if roc_auc else 'N/A':.4f}")
+
+    # Get training accuracy for comparison
+    train_acc_final = accuracy_score(y_train_balanced, best_knn.predict(X_train_pca))
+    print(f"  Training Accuracy: {train_acc_final:.4f}")
+    print(f"  Train-Test Gap: {train_acc_final - acc:.4f}")
+
+    # Analyze performance
+    performance_results = analyze_model_performance_with_balanced_metrics(
+        best_knn, X_train_pca, X_test_pca,
+        y_train_balanced, y_test, "KNN", results_dir
+    )
+
+    # Plot REAL learning curves
+    print("\nCreating REAL learning curves for KNN...")
+    learning_curve_data = plot_real_learning_curves(
+        best_knn, X_train_pca, y_train_balanced, "KNN", results_dir
+    )
+
+    # Save model (EXISTING CODE)
+    joblib.dump(best_knn, os.path.join(results_dir, 'knn_model.joblib'))
+    joblib.dump(scaler, os.path.join(results_dir, 'knn_scaler.joblib'))
+    joblib.dump(pca, os.path.join(results_dir, 'knn_pca.joblib'))
+
+    # NEW: Save as .pt file for reuse without training
+    knn_model_path = save_trained_model_pt(best_knn, scaler, pca, 'knn', results_dir)
+
+    # Save the actual parameters used
+    params_used = best_knn.get_params()
+    params_df = pd.DataFrame([params_used])
+    params_df.to_csv(os.path.join(results_dir, 'knn_final_params.csv'), index=False)
+
+    return {
+        'model': best_knn,
+        'scaler': scaler,
+        'pca': pca,
+        'accuracy': acc,
+        'balanced_accuracy': balanced_acc,
+        'roc_auc': roc_auc,
+        'performance_results': performance_results,
+        'learning_curve_data': learning_curve_data,
+        'train_accuracy': train_acc_final,
+        'model_path': knn_model_path  # Added model path
+    }
+
+
+# ---------------------------- Neural Network Training with Regularization ----------------------------
+def train_neural_network_model(X, y, feature_names=None, results_dir='results'):
+    """Train Neural Network (MLP) with strong regularization to prevent overfitting"""
+    os.makedirs(results_dir, exist_ok=True)
+
+    print("\n" + "=" * 60)
+    print("TRAINING NEURAL NETWORK WITH STRONG REGULARIZATION")
     print("=" * 60)
 
     # Split data
@@ -1010,75 +1282,145 @@ def train_knn_model_conservative(X, y, feature_names=None, results_dir='results'
     # Balance training data
     X_train_balanced, y_train_balanced = balance_dataset(X_train, y_train)
 
-    # Scale features
+    # Scale features - CRITICAL for neural networks
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train_balanced)
     X_test_scaled = scaler.transform(X_test)
 
-    # Apply PCA
-    pca = PCA(n_components=min(15, X_train_scaled.shape[1]), random_state=42)
+    # Apply PCA for dimensionality reduction
+    pca = PCA(n_components=min(20, X_train_scaled.shape[1]), random_state=42)
     X_train_pca = pca.fit_transform(X_train_scaled)
     X_test_pca = pca.transform(X_test_scaled)
 
-    # Add noise
+    print(f"Neural Network - Features after PCA: {X_train_pca.shape[1]}")
+    print(f"Neural Network - Training samples: {len(X_train_pca)}")
+    print(f"Neural Network - Test samples: {len(X_test_pca)}")
+
+    # Add noise and augmentation
     X_train_augmented, y_train_augmented = add_controlled_noise_and_augmentation(
         X_train_pca, y_train_balanced, noise_level=0.02
     )
 
-    # Define KNN with conservative settings
-    knn = KNeighborsClassifier()
+    # Define Neural Network with strong regularization
+    # Using smaller architecture with regularization
+    nn = MLPClassifier(random_state=42, early_stopping=True, validation_fraction=0.2)
 
-    # Parameter grid with conservative neighbors
+    # Parameter grid with strong regularization
     param_grid = {
-        'n_neighbors': [5, 7, 9, 11, 13],  # More neighbors for smoother decision boundary
-        'weights': ['distance'],  # Distance weighting
-        'p': [2],  # Euclidean distance
-        'algorithm': ['auto']
+        'hidden_layer_sizes': [(50,), (30, 20), (40,), (20, 10), (25, 15, 10)],  # Smaller architectures
+        'activation': ['relu', 'tanh'],
+        'alpha': [0.001, 0.01, 0.1, 0.5],  # L2 regularization (strong)
+        'learning_rate': ['constant', 'adaptive'],
+        'learning_rate_init': [0.001, 0.01, 0.1],
+        'max_iter': [500, 1000],  # Limit iterations
+        'batch_size': [16, 32, 64],
+        'solver': ['adam', 'sgd'],
+        'beta_1': [0.9, 0.95],  # Adam parameters
+        'beta_2': [0.999, 0.99],
+        'epsilon': [1e-8, 1e-7],
+        'n_iter_no_change': [10, 20],  # Early stopping patience
+        'tol': [1e-4, 1e-3]  # Tolerance for optimization
     }
 
-    # Train
-    best_knn, best_params = train_model_with_strong_regularization(
-        knn, X_train_augmented, y_train_augmented, "KNN", param_grid
+    # Train with regularization
+    best_nn, best_params = train_model_with_strong_regularization(
+        nn, X_train_augmented, y_train_augmented, "Neural Network", param_grid
     )
 
     # Evaluate
-    y_pred = best_knn.predict(X_test_pca)
-    y_proba = best_knn.predict_proba(X_test_pca)[:, 1]
+    y_pred = best_nn.predict(X_test_pca)
+    y_proba = best_nn.predict_proba(X_test_pca)[:, 1]
 
     acc = accuracy_score(y_test, y_pred)
     balanced_acc = balanced_accuracy_score(y_test, y_pred)
     cm = confusion_matrix(y_test, y_pred)
     roc_auc = roc_auc_score(y_test, y_proba)
 
-    print(f"\nKNN Test Accuracy: {acc:.4f}")
-    print(f"KNN Balanced Accuracy: {balanced_acc:.4f}")
-    print(f"KNN ROC-AUC: {roc_auc:.4f}")
+    print(f"\nNeural Network Test Accuracy: {acc:.4f}")
+    print(f"Neural Network Balanced Accuracy: {balanced_acc:.4f}")
+    print(f"Neural Network ROC-AUC: {roc_auc:.4f}")
+
+    # Get training history if available
+    if hasattr(best_nn, 'loss_curve_'):
+        print(f"Neural Network - Final training loss: {best_nn.loss_curve_[-1]:.4f}")
+        if hasattr(best_nn, 'validation_scores_'):
+            print(f"Neural Network - Final validation score: {best_nn.validation_scores_[-1]:.4f}")
 
     # Analyze performance
     performance_results = analyze_model_performance_with_balanced_metrics(
-        best_knn, X_train_pca, X_test_pca,
-        y_train_balanced, y_test, "KNN", results_dir
+        best_nn, X_train_pca, X_test_pca,
+        y_train_balanced, y_test, "Neural Network", results_dir
     )
 
     # Plot REAL learning curves
+    print("\nCreating REAL learning curves for Neural Network...")
     learning_curve_data = plot_real_learning_curves(
-        best_knn, X_train_pca, y_train_balanced, "KNN", results_dir
+        best_nn, X_train_pca, y_train_balanced, "Neural Network", results_dir
     )
 
-    # Save model
-    joblib.dump(best_knn, os.path.join(results_dir, 'knn_model.joblib'))
-    joblib.dump(scaler, os.path.join(results_dir, 'knn_scaler.joblib'))
-    joblib.dump(pca, os.path.join(results_dir, 'knn_pca.joblib'))
+    # Plot training history if available
+    if hasattr(best_nn, 'loss_curve_'):
+        plt.figure(figsize=(12, 5))
+
+        # Plot loss curve
+        plt.subplot(1, 2, 1)
+        plt.plot(best_nn.loss_curve_, label='Training Loss')
+        plt.xlabel('Iterations')
+        plt.ylabel('Loss')
+        plt.title('Neural Network Training Loss Curve')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+
+        # Plot validation score if available
+        plt.subplot(1, 2, 2)
+        if hasattr(best_nn, 'validation_scores_'):
+            plt.plot(best_nn.validation_scores_, label='Validation Score', color='green')
+            plt.xlabel('Iterations')
+            plt.ylabel('Validation Score')
+            plt.title('Neural Network Validation Score')
+            plt.legend()
+        else:
+            plt.text(0.5, 0.5, 'Validation scores not available',
+                     ha='center', va='center', fontsize=12)
+            plt.title('Validation Score')
+
+        plt.tight_layout()
+        history_path = os.path.join(results_dir, 'neural_network_training_history.png')
+        plt.savefig(history_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"✓ Neural Network training history saved to: {history_path}")
+
+    # Save model (EXISTING CODE)
+    joblib.dump(best_nn, os.path.join(results_dir, 'neural_network_model.joblib'))
+    joblib.dump(scaler, os.path.join(results_dir, 'neural_network_scaler.joblib'))
+    joblib.dump(pca, os.path.join(results_dir, 'neural_network_pca.joblib'))
+
+    # NEW: Save as .pt file for reuse without training
+    nn_model_path = save_trained_model_pt(best_nn, scaler, pca, 'neural_network', results_dir)
+
+    # Save the architecture and parameters
+    nn_info = pd.DataFrame({
+        'hidden_layer_sizes': [str(best_nn.hidden_layer_sizes)],
+        'activation': [best_nn.activation],
+        'alpha': [best_nn.alpha],
+        'learning_rate': [best_nn.learning_rate],
+        'n_iter': [best_nn.n_iter_],
+        'n_layers': [len(best_nn.hidden_layer_sizes) + 2],  # +2 for input and output layers
+        'n_neurons_total': [sum(best_nn.hidden_layer_sizes) if hasattr(best_nn.hidden_layer_sizes, '__len__')
+                            else best_nn.hidden_layer_sizes]
+    })
+    nn_info.to_csv(os.path.join(results_dir, 'neural_network_architecture.csv'), index=False)
 
     return {
-        'model': best_knn,
+        'model': best_nn,
         'scaler': scaler,
         'pca': pca,
         'accuracy': acc,
         'balanced_accuracy': balanced_acc,
         'roc_auc': roc_auc,
         'performance_results': performance_results,
-        'learning_curve_data': learning_curve_data
+        'learning_curve_data': learning_curve_data,
+        'model_path': nn_model_path  # Added model path
     }
 
 
@@ -1152,9 +1494,12 @@ def train_random_forest_model_limited(X, y, feature_names=None, results_dir='res
         best_rf, X_train_pca, y_train_balanced, "Random Forest", results_dir
     )
 
-    # Save model
+    # Save model (EXISTING CODE)
     joblib.dump(best_rf, os.path.join(results_dir, 'random_forest_model.joblib'))
     joblib.dump(pca, os.path.join(results_dir, 'random_forest_pca.joblib'))
+
+    # NEW: Save as .pt file for reuse without training
+    rf_model_path = save_trained_model_pt(best_rf, None, pca, 'random_forest', results_dir)
 
     return {
         'model': best_rf,
@@ -1163,7 +1508,8 @@ def train_random_forest_model_limited(X, y, feature_names=None, results_dir='res
         'balanced_accuracy': balanced_acc,
         'roc_auc': roc_auc,
         'performance_results': performance_results,
-        'learning_curve_data': learning_curve_data
+        'learning_curve_data': learning_curve_data,
+        'model_path': rf_model_path  # Added model path
     }
 
 
@@ -1189,7 +1535,8 @@ def compare_all_models_balanced(all_results, results_dir='results'):
                 'Train_Balanced_Accuracy': perf['train_balanced_acc'],
                 'Test_Balanced_Accuracy': perf['test_balanced_acc'],
                 'Balanced_Accuracy_Gap': perf['balanced_acc_gap'],
-                'Overfitting_Severity': perf['severity']
+                'Overfitting_Severity': perf['severity'],
+                'Model_Path': results.get('model_path', 'N/A')  # Added model path
             })
 
     if not comparison_data:
@@ -1295,14 +1642,336 @@ def compare_all_models_balanced(all_results, results_dir='results'):
     print(f"   Overfitting Gap: {best_model['Balanced_Accuracy_Gap']:.4f}")
     print(f"   Overall Score: {best_model['Score']:.4f}")
     print(f"   Severity: {best_model['Overfitting_Severity']}")
+    print(f"   Model saved at: {best_model['Model_Path']}")
 
     return comparison_df
 
 
-# ---------------------------- Main Function ----------------------------
-def main():
+# ---------------------------- Simple Reuse Functions ----------------------------
+def create_reuse_instructions():
+    """Create instructions for reusing trained models"""
+    instructions = """
+    =====================================================================
+    HOW TO REUSE TRAINED MODELS WITHOUT RETRAINING
+    =====================================================================
+
+    Your trained models have been saved as .pt files in the 'results' folder.
+
+    To reuse any model without training:
+
+    1. LOAD THE TRAINED MODEL:
+    ```python
+    import torch
+
+    # Load the model
+    model_data = torch.load('results/svm_trained_model.pt', weights_only=False)  # or any other model
+
+    # Get the components
+    model = model_data['model']           # Trained sklearn model
+    scaler = model_data['scaler']         # Scaler used (if any)
+    pca = model_data['pca']               # PCA used (if any)
+    model_type = model_data['model_type'] # Type of model
+    ```
+
+    2. PREPARE NEW DATA:
+    ```python
+    # Extract features from new images (same as training)
+    extractor = TeaLeafFeatureExtractor()
+    new_features = []  # Extract features same way as during training
+
+    # The new_features should have same shape as training data
+    ```
+
+    3. MAKE PREDICTIONS:
+    ```python
+    # Preprocess new features (same as during training)
+    if scaler is not None:
+        new_features = scaler.transform(new_features)
+    if pca is not None:
+        new_features = pca.transform(new_features)
+
+    # Make predictions
+    predictions = model.predict(new_features)
+    probabilities = model.predict_proba(new_features)  # if available
+    ```
+
+    4. AVAILABLE MODELS (.pt files):
+       - results/svm_trained_model.pt
+       - results/decision_tree_trained_model.pt
+       - results/knn_trained_model.pt
+       - results/neural_network_trained_model.pt
+       - results/random_forest_trained_model.pt
+
+    5. QUICK PREDICTION FUNCTION:
+    ```python
+    def quick_predict(model_path, features):
+        model_data = torch.load(model_path, weights_only=False)
+        model = model_data['model']
+        scaler = model_data['scaler']
+        pca = model_data['pca']
+
+        if scaler: features = scaler.transform(features)
+        if pca: features = pca.transform(features)
+
+        return model.predict(features), model.predict_proba(features)
+    ```
+
+    No need to retrain! Just load and predict.
+    =====================================================================
     """
-    Main function to run tea leaf feature engineering and model training
+
+    with open('results/reuse_instructions.txt', 'w') as f:
+        f.write(instructions)
+    print("✓ Created reuse instructions: results/reuse_instructions.txt")
+
+
+# ---------------------------- SINGLE IMAGE PREDICTION FUNCTION ----------------------------
+def predict_single_image(image_path, extractor, feature_names=None, results_dir='results'):
+    """
+    Predict whether a single image is tea leaf or not using all trained models
+    """
+    print("\n" + "=" * 70)
+    print("PREDICTING SINGLE IMAGE")
+    print("=" * 70)
+
+    # Check if results directory exists
+    if not os.path.exists(results_dir):
+        print(f"Error: Results directory '{results_dir}' not found!")
+        print("Please run training first to generate models.")
+        return
+
+    # Load and preprocess the input image
+    try:
+        # Read image
+        img = cv2.imread(image_path)
+        if img is None:
+            print(f"Error: Could not read image from {image_path}")
+            return
+
+        print(f"Processing image: {os.path.basename(image_path)}")
+        print(f"Original size: {img.shape}")
+
+        # Preprocess image same as training
+        img_resized = cv2.resize(img, extractor.image_size)
+        img_rgb = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
+        img_hsv = cv2.cvtColor(img_resized, cv2.COLOR_BGR2HSV)
+        img_lab = cv2.cvtColor(img_resized, cv2.COLOR_BGR2LAB)
+        img_gray = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
+
+        image_data = {
+            'rgb': img_rgb,
+            'hsv': img_hsv,
+            'lab': img_lab,
+            'gray': img_gray,
+            'label': None,  # No label for prediction
+            'filename': os.path.basename(image_path)
+        }
+
+        # Extract features using the same methods
+        color_features, _ = extractor.extract_tea_specific_color_features(image_data)
+        texture_features, _ = extractor.extract_texture_features_tea(image_data)
+        shape_features, _ = extractor.extract_shape_size_features(image_data)
+
+        # Combine all features
+        features = np.concatenate([color_features, texture_features, shape_features])
+
+        # Ensure we have the right number of features
+        if feature_names and len(features) != len(feature_names):
+            print(f"Warning: Feature count mismatch. Expected {len(feature_names)}, got {len(features)}")
+            # Use only the first n features
+            features = features[:len(feature_names)]
+        elif not feature_names:
+            print("Warning: No feature names provided. Using generic names.")
+            feature_names = [f'feat_{i}' for i in range(len(features))]
+
+        print(f"✓ Extracted {len(features)} features")
+
+        # Reshape for model prediction (1 sample, n_features)
+        features = features.reshape(1, -1)
+
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        traceback.print_exc()
+        return
+
+    # List of models to test
+    model_types = ['svm', 'decision_tree', 'knn', 'neural_network', 'random_forest']
+
+    results = {}
+
+    for model_type in model_types:
+        print(f"\n--- {model_type.upper()} Model ---")
+
+        model_path = os.path.join(results_dir, f'{model_type}_trained_model.pt')
+
+        if not os.path.exists(model_path):
+            print(f"  ⚠️  Model file not found: {model_path}")
+            print(f"     Training {model_type} model first...")
+
+            # Since models aren't trained yet, we need to train them first
+            # For now, just skip
+            print(f"     Skipping {model_type}. Run training first.")
+            continue
+
+        try:
+            # FIX: Use weights_only=False for PyTorch 2.6+ compatibility
+            model_data = torch.load(model_path, weights_only=False)
+            model = model_data['model']
+            scaler = model_data.get('scaler', None)
+            pca = model_data.get('pca', None)
+
+            print(f"  ✓ Loaded {model_type} model")
+            print(f"    Model type: {model.__class__.__name__}")
+            print(f"    Has scaler: {scaler is not None}")
+            print(f"    Has PCA: {pca is not None}")
+
+            # Prepare features for this specific model
+            features_processed = features.copy()
+
+            # Apply the same preprocessing as during training
+            if scaler is not None:
+                features_processed = scaler.transform(features_processed)
+
+            if pca is not None:
+                features_processed = pca.transform(features_processed)
+
+            # Make prediction
+            if hasattr(model, 'predict_proba'):
+                probabilities = model.predict_proba(features_processed)
+                prediction = model.predict(features_processed)
+
+                tea_prob = probabilities[0][1] if len(probabilities[0]) > 1 else probabilities[0][0]
+                non_tea_prob = probabilities[0][0]
+
+                # Convert prediction to label
+                pred_label = "Tea Leaf" if prediction[0] == 1 else "Non-Tea"
+
+                print(f"  🍃 Prediction: {pred_label}")
+                print(f"    Confidence: Tea Leaf: {tea_prob:.2%}, Non-Tea: {non_tea_prob:.2%}")
+
+                # Determine confidence level
+                confidence = max(tea_prob, non_tea_prob)
+                if confidence > 0.8:
+                    confidence_text = "HIGH confidence"
+                elif confidence > 0.6:
+                    confidence_text = "MODERATE confidence"
+                else:
+                    confidence_text = "LOW confidence"
+
+                print(f"    {confidence_text}")
+
+                results[model_type] = {
+                    'prediction': pred_label,
+                    'tea_probability': tea_prob,
+                    'non_tea_probability': non_tea_prob,
+                    'confidence': confidence,
+                    'model_name': model_type.upper()
+                }
+
+            else:
+                prediction = model.predict(features_processed)
+                pred_label = "Tea Leaf" if prediction[0] == 1 else "Non-Tea"
+
+                print(f"  🍃 Prediction: {pred_label}")
+                print(f"    (Probability scores not available for this model)")
+
+                results[model_type] = {
+                    'prediction': pred_label,
+                    'tea_probability': None,
+                    'non_tea_probability': None,
+                    'confidence': None,
+                    'model_name': model_type.upper()
+                }
+
+            # Show model-specific info
+            if model_type == 'decision_tree':
+                if hasattr(model, 'get_depth'):
+                    print(f"    Tree depth: {model.get_depth()}")
+
+            elif model_type == 'knn':
+                if hasattr(model, 'n_neighbors'):
+                    print(f"    Number of neighbors: {model.n_neighbors}")
+
+            elif model_type == 'neural_network':
+                if hasattr(model, 'n_layers_'):
+                    print(f"    Network layers: {model.n_layers_}")
+
+            elif model_type == 'random_forest':
+                if hasattr(model, 'n_estimators'):
+                    print(f"    Number of trees: {model.n_estimators}")
+
+        except Exception as e:
+            print(f"  ❌ Error with {model_type}: {e}")
+            traceback.print_exc()
+
+    # Display summary of all predictions
+    print("\n" + "=" * 70)
+    print("PREDICTION SUMMARY")
+    print("=" * 70)
+    print(f"Image: {os.path.basename(image_path)}")
+    print("-" * 70)
+
+    if results:
+        for model_type, result in results.items():
+            pred = result['prediction']
+            confidence = result.get('confidence', None)
+
+            if confidence is not None:
+                print(f"{model_type.upper():<20} : {pred:<15} (Confidence: {confidence:.1%})")
+            else:
+                print(f"{model_type.upper():<20} : {pred}")
+
+        # Count votes
+        tea_votes = sum(1 for r in results.values() if r['prediction'] == "Tea Leaf")
+        non_tea_votes = sum(1 for r in results.values() if r['prediction'] == "Non-Tea")
+
+        print("-" * 70)
+        print(f"MAJORITY VOTE: {'Tea Leaf' if tea_votes > non_tea_votes else 'Non-Tea'}")
+        print(f"(Votes: Tea Leaf: {tea_votes}, Non-Tea: {non_tea_votes})")
+
+        # Calculate average confidence for tea predictions
+        tea_confidences = [r['tea_probability'] for r in results.values()
+                           if r['tea_probability'] is not None and r['prediction'] == "Tea Leaf"]
+        if tea_confidences:
+            avg_tea_confidence = np.mean(tea_confidences)
+            print(f"Average confidence for Tea Leaf predictions: {avg_tea_confidence:.1%}")
+
+        # Save results to CSV
+        results_df = pd.DataFrame([
+            {
+                'model': result['model_name'],
+                'prediction': result['prediction'],
+                'tea_probability': result['tea_probability'],
+                'non_tea_probability': result['non_tea_probability'],
+                'confidence': result['confidence'],
+                'image': os.path.basename(image_path),
+                'timestamp': pd.Timestamp.now()
+            }
+            for result in results.values()
+        ])
+
+        # Create predictions directory
+        pred_dir = os.path.join(results_dir, 'predictions')
+        os.makedirs(pred_dir, exist_ok=True)
+
+        # Save with timestamp
+        timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
+        filename_base = os.path.splitext(os.path.basename(image_path))[0]
+        csv_path = os.path.join(pred_dir, f'prediction_{filename_base}_{timestamp}.csv')
+        results_df.to_csv(csv_path, index=False)
+
+        print(f"\n✓ Predictions saved to: {csv_path}")
+
+    else:
+        print("No predictions were made. Make sure models are trained first.")
+
+    return results
+
+
+# ---------------------------- MODIFIED MAIN FUNCTION ----------------------------
+def main_with_prediction(image_path=None):
+    """
+    Modified main function that can either train models or predict on a single image
     """
     # Create directories
     os.makedirs('results', exist_ok=True)
@@ -1310,6 +1979,47 @@ def main():
     # Initialize feature extractor
     extractor = TeaLeafFeatureExtractor()
 
+    # If image path is provided, only do prediction
+    if image_path:
+        if not os.path.exists(image_path):
+            print(f"Error: Image file '{image_path}' does not exist!")
+            return
+
+        # Check if models exist
+        model_types = ['svm', 'decision_tree', 'knn', 'neural_network', 'random_forest']
+        models_exist = any(
+            os.path.exists(os.path.join('results', f'{model_type}_trained_model.pt'))
+            for model_type in model_types
+        )
+
+        if not models_exist:
+            print("⚠️  No trained models found in 'results' folder.")
+            print("   Please run training first or run without image path.")
+            response = input("   Do you want to train models now? (y/n): ")
+            if response.lower() == 'y':
+                print("\nStarting model training...")
+                # Continue with training
+                pass
+            else:
+                print("Exiting.")
+                return
+        else:
+            # Load feature names from training if available
+            feature_names = None
+            feature_csv = 'results/tea_leaf_features.csv'
+            if os.path.exists(feature_csv):
+                df = pd.read_csv(feature_csv)
+                # Get feature columns (exclude label columns)
+                feature_cols = [col for col in df.columns if col not in ['label', 'is_tea_leaf']]
+                if feature_cols:
+                    feature_names = feature_cols
+                    print(f"✓ Loaded {len(feature_names)} feature names from training data")
+
+            # Make prediction
+            predict_single_image(image_path, extractor, feature_names, 'results')
+            return
+
+    # Original training code continues here...
     # Load images
     tea_leaves_folder = "data/tea_leaves"
     non_tea_folder = "data/non_tea"
@@ -1465,15 +2175,26 @@ def main():
         print(f"Error training Decision Tree: {e}")
         traceback.print_exc()
 
-    # Train KNN
+    # Train KNN (FIXED VERSION)
     try:
         print("\n" + "=" * 40)
-        print("TRAINING KNN (Conservative)")
+        print("TRAINING KNN (Improved Regularization)")
         print("=" * 40)
         knn_results = train_knn_model_conservative(X_data, y_data, extractor.feature_names, 'results')
         all_results['KNN'] = knn_results
     except Exception as e:
         print(f"Error training KNN: {e}")
+        traceback.print_exc()
+
+    # Train Neural Network
+    try:
+        print("\n" + "=" * 40)
+        print("TRAINING NEURAL NETWORK (Regularized)")
+        print("=" * 40)
+        nn_results = train_neural_network_model(X_data, y_data, extractor.feature_names, 'results')
+        all_results['Neural Network'] = nn_results
+    except Exception as e:
+        print(f"Error training Neural Network: {e}")
         traceback.print_exc()
 
     # Train Random Forest
@@ -1491,18 +2212,50 @@ def main():
     if all_results:
         compare_all_models_balanced(all_results, 'results')
 
+    # Create reuse instructions
+    create_reuse_instructions()
+
+    # Show what .pt files were created
+    import glob
+    pt_files = glob.glob('results/*_trained_model.pt')
+
+    print("\n" + "=" * 70)
+    print(".PT FILES CREATED FOR REUSE WITHOUT TRAINING")
+    print("=" * 70)
+    print("\n✅ The following trained models are saved as .pt files:")
+    for pt_file in pt_files:
+        print(f"   - {os.path.basename(pt_file)}")
+
+    print("\n🔥 NO NEED TO RETRAIN! To reuse any model:")
+    print("   1. Load with: torch.load('results/model_name_trained_model.pt', weights_only=False)")
+    print("   2. Get model, scaler, pca from the loaded dictionary")
+    print("   3. Preprocess new data (same as training)")
+    print("   4. Predict using model.predict()")
+
+    print("\n📖 Detailed instructions: results/reuse_instructions.txt")
+
     print("\n" + "=" * 70)
     print("TRAINING COMPLETED SUCCESSFULLY!")
     print("=" * 70)
     print("\n✅ AGGRESSIVE ANTI-OVERFITTING MEASURES APPLIED:")
     print("   1. Dataset balancing (undersampling majority class)")
     print("   2. Strong regularization in all models")
-    print("   3. PCA for dimensionality reduction (15-20 components)")
+    print("   3. PCA for dimensionality reduction (15-30 components)")
     print("   4. Data augmentation with controlled noise")
-    print("   5. Label flipping for 2% of samples")
-    print("   6. Larger test size (40%) for better validation")
-    print("   7. Conservative model parameters (shallow trees, more neighbors)")
-    print("   8. REAL learning curves using sklearn's learning_curve()")
+    print("   5. Label flipping for 2-3% of samples")
+    print("   6. Conservative model parameters (shallow trees, more neighbors)")
+    print("   7. REAL learning curves using sklearn's learning_curve()")
+    print("   8. SPECIFIC FIXES FOR KNN:")
+    print("      - Higher noise level (0.05 vs 0.02)")
+    print("      - More neighbors (up to 25)")
+    print("      - Feature dropout augmentation")
+    print("      - Automatic regularization if overfitting detected")
+    print("      - Dynamic PCA component selection")
+    print("   9. NEURAL NETWORK REGULARIZATION:")
+    print("      - Early stopping enabled")
+    print("      - Strong L2 regularization (alpha up to 0.5)")
+    print("      - Small network architectures (max 50 neurons)")
+    print("      - Limited iterations (max 1000)")
 
     print("\n📊 REALISTIC RESULTS NOW GUARANTEED:")
     print("   - Training loss > 0 (no more perfect classification)")
@@ -1516,12 +2269,319 @@ def main():
     print("   - *_learning_curve_data.csv (Raw learning curve data)")
     print("   - model_comparison_balanced.csv (Comparison using balanced metrics)")
     print("   - model_comparison_balanced_visualization.png (Visual comparison)")
+    print("   - knn_final_params.csv (Final parameters used for KNN)")
+    print("   - neural_network_training_history.png (NN training loss curve)")
+    print("   - neural_network_architecture.csv (NN architecture details)")
+    print("   - *.pt files (Trained models for reuse without retraining)")
+    print("   - reuse_instructions.txt (How to reuse models)")
+
+    # Ask if user wants to test an image
+    print("\n" + "=" * 70)
+    test_image = input("Do you want to test an image now? Enter image path (or press Enter to skip): ").strip()
+    if test_image and os.path.exists(test_image):
+        print(f"\nTesting image: {test_image}")
+        predict_single_image(test_image, extractor, extractor.feature_names, 'results')
+    elif test_image:
+        print(f"Image not found: {test_image}")
 
 
+# ---------------------------- VALIDATION FUNCTIONS (UPDATED) ----------------------------
+def load_validation_images(validation_folder, extractor, label=None):
+    """
+    Load images from validation folder.
+    If label is provided, all images are assigned that label (e.g., for single-class folder).
+    Otherwise expects subfolders 'tea_leaves' (label=1) and 'non_tea' (label=0).
+    If no images found, checks for exactly one subfolder and loads images from there (unknown labels).
+    """
+    images_data = []
+    valid_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tiff')
+
+    if not os.path.exists(validation_folder):
+        print(f"❌ Validation folder '{validation_folder}' does not exist.")
+        return images_data
+
+    # If a specific label is given, load all images from the folder with that label
+    if label is not None:
+        folder_path = validation_folder
+        print(f"Loading images from single folder '{folder_path}' with label {label}")
+        for fname in sorted(os.listdir(folder_path)):
+            if fname.lower().endswith(valid_extensions):
+                img_path = os.path.join(folder_path, fname)
+                img = cv2.imread(img_path)
+                if img is None:
+                    continue
+                img = cv2.resize(img, extractor.image_size)
+                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+                img_lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+                img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                images_data.append({
+                    'rgb': img_rgb, 'hsv': img_hsv, 'lab': img_lab, 'gray': img_gray,
+                    'label': label, 'filename': fname
+                })
+        print(f"   Loaded {len(images_data)} images.")
+        return images_data
+
+    # Otherwise try to load from subfolders 'tea_leaves' and 'non_tea'
+    subfolders_found = False
+    for subfolder, lbl in [('tea_leaves', 1), ('non_tea', 0)]:
+        folder_path = os.path.join(validation_folder, subfolder)
+        if os.path.exists(folder_path):
+            subfolders_found = True
+            print(f"Loading images from '{subfolder}' (label={lbl})...")
+            for fname in sorted(os.listdir(folder_path)):
+                if fname.lower().endswith(valid_extensions):
+                    img_path = os.path.join(folder_path, fname)
+                    img = cv2.imread(img_path)
+                    if img is None:
+                        continue
+                    img = cv2.resize(img, extractor.image_size)
+                    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+                    img_lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+                    img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    images_data.append({
+                        'rgb': img_rgb, 'hsv': img_hsv, 'lab': img_lab, 'gray': img_gray,
+                        'label': lbl, 'filename': fname
+                    })
+
+    if subfolders_found:
+        print(f"✅ Total validation images loaded from subfolders: {len(images_data)}")
+        return images_data
+
+    # No subfolders found, try loading images directly from validation_folder
+    direct_images = []
+    for fname in sorted(os.listdir(validation_folder)):
+        if fname.lower().endswith(valid_extensions):
+            img_path = os.path.join(validation_folder, fname)
+            img = cv2.imread(img_path)
+            if img is None:
+                continue
+            img = cv2.resize(img, extractor.image_size)
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            img_lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+            img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            direct_images.append({
+                'rgb': img_rgb, 'hsv': img_hsv, 'lab': img_lab, 'gray': img_gray,
+                'label': -1, 'filename': fname
+            })
+
+    if direct_images:
+        print(f"Loaded {len(direct_images)} images directly from '{validation_folder}' (unknown labels).")
+        return direct_images
+
+    # No images found directly; check if there is exactly one subfolder
+    subdirs = [d for d in os.listdir(validation_folder) if os.path.isdir(os.path.join(validation_folder, d))]
+    if len(subdirs) == 1:
+        only_sub = subdirs[0]
+        sub_path = os.path.join(validation_folder, only_sub)
+        print(f"No images in top folder; found single subfolder '{only_sub}'. Loading images from there (unknown labels).")
+        for fname in sorted(os.listdir(sub_path)):
+            if fname.lower().endswith(valid_extensions):
+                img_path = os.path.join(sub_path, fname)
+                img = cv2.imread(img_path)
+                if img is None:
+                    continue
+                img = cv2.resize(img, extractor.image_size)
+                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+                img_lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+                img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                images_data.append({
+                    'rgb': img_rgb, 'hsv': img_hsv, 'lab': img_lab, 'gray': img_gray,
+                    'label': -1, 'filename': fname
+                })
+        print(f"   Loaded {len(images_data)} images from subfolder '{only_sub}'.")
+    else:
+        print(f"No images found in '{validation_folder}' or its subfolders.")
+
+    return images_data
 
 
+def validate_models(validation_folder='validation', results_dir='results'):
+    """
+    Validate all trained models on images in validation_folder.
+    Saves a report and confusion matrix plots (if labels are known).
+    If labels are unknown, only per-image predictions are saved.
+    """
+    print("\n" + "=" * 70)
+    print("VALIDATING MODELS ON VALIDATION IMAGES")
+    print("=" * 70)
+
+    if not os.path.exists(results_dir):
+        print(f"❌ Results folder '{results_dir}' not found. Please train models first.")
+        return
+
+    # Find all trained .pt models
+    model_paths = glob.glob(os.path.join(results_dir, '*_trained_model.pt'))
+    if not model_paths:
+        print("❌ No trained models found. Run training first (option 1).")
+        return
+
+    # Initialise feature extractor
+    extractor = TeaLeafFeatureExtractor()
+
+    # Load validation images
+    val_images = load_validation_images(validation_folder, extractor)
+    if len(val_images) == 0:
+        print("❌ No validation images loaded. Check your folder structure.")
+        return
+
+    # Extract features for all validation images
+    print("\nExtracting features from validation images...")
+    val_features, val_labels = extractor.extract_all_features(val_images)
+
+    if val_features.shape[0] == 0:
+        print("❌ Feature extraction failed.")
+        return
+
+    print(f"✅ Validation features shape: {val_features.shape}")
+
+    # Check if we have true labels (any label != -1)
+    have_labels = np.any(val_labels != -1)
+    if not have_labels:
+        print("⚠️  No ground truth labels found (all labels are -1). Metrics will not be computed.")
+        print("   Only per‑image predictions will be saved.")
+
+    # Prepare results storage
+    all_results = []
+    os.makedirs(os.path.join(results_dir, 'validation'), exist_ok=True)
+
+    # Loop over each model
+    for model_path in model_paths:
+        model_name = os.path.basename(model_path).replace('_trained_model.pt', '').upper()
+        print(f"\n--- Validating {model_name} ---")
+
+        try:
+            # Load model data
+            model_data = torch.load(model_path, weights_only=False)
+            model = model_data['model']
+            scaler = model_data.get('scaler', None)
+            pca = model_data.get('pca', None)
+
+            # Prepare validation features
+            X_val = val_features.copy()
+            if scaler is not None:
+                X_val = scaler.transform(X_val)
+            if pca is not None:
+                X_val = pca.transform(X_val)
+
+            # Predict
+            y_pred = model.predict(X_val)
+            if hasattr(model, 'predict_proba'):
+                y_proba = model.predict_proba(X_val)[:, 1]
+            else:
+                y_proba = None
+
+            # If we have true labels, compute metrics
+            if have_labels:
+                acc = accuracy_score(val_labels, y_pred)
+                balanced_acc = balanced_accuracy_score(val_labels, y_pred)
+                cm = confusion_matrix(val_labels, y_pred)
+                report = classification_report(val_labels, y_pred,
+                                               target_names=['non_tea', 'tea'],
+                                               output_dict=True)
+
+                print(f"   Accuracy: {acc:.4f}")
+                print(f"   Balanced Accuracy: {balanced_acc:.4f}")
+                print(f"   Confusion Matrix:\n{cm}")
+
+                # Save confusion matrix plot
+                plt.figure(figsize=(6,5))
+                sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                            xticklabels=['non_tea','tea'],
+                            yticklabels=['non_tea','tea'])
+                plt.title(f'{model_name} Validation Confusion Matrix')
+                plt.ylabel('True')
+                plt.xlabel('Predicted')
+                plot_path = os.path.join(results_dir, 'validation', f'{model_name.lower()}_val_cm.png')
+                plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+                plt.close()
+
+                # Save confusion matrix as CSV
+                cm_df = pd.DataFrame(cm, index=['true_non_tea','true_tea'],
+                                     columns=['pred_non_tea','pred_tea'])
+                cm_df.to_csv(os.path.join(results_dir, 'validation', f'{model_name.lower()}_val_cm.csv'))
+
+                # Store results
+                all_results.append({
+                    'model': model_name,
+                    'accuracy': acc,
+                    'balanced_accuracy': balanced_acc,
+                    'tn': cm[0,0], 'fp': cm[0,1],
+                    'fn': cm[1,0], 'tp': cm[1,1],
+                    'precision_tea': report['tea']['precision'],
+                    'recall_tea': report['tea']['recall'],
+                    'f1_tea': report['tea']['f1-score'],
+                    'precision_non_tea': report['non_tea']['precision'],
+                    'recall_non_tea': report['non_tea']['recall'],
+                    'f1_non_tea': report['non_tea']['f1-score']
+                })
+
+            # Always save per‑image predictions
+            pred_df = pd.DataFrame({
+                'filename': [img['filename'] for img in val_images],
+                'true_label': val_labels if have_labels else None,
+                'predicted_label': y_pred,
+                'probability_tea': y_proba if y_proba is not None else None
+            })
+            pred_df.to_csv(os.path.join(results_dir, 'validation', f'{model_name.lower()}_val_predictions.csv'),
+                           index=False)
+
+        except Exception as e:
+            print(f"❌ Error validating {model_name}: {e}")
+            traceback.print_exc()
+
+    # Summary of all models (only if we had labels)
+    if all_results:
+        summary_df = pd.DataFrame(all_results)
+        summary_path = os.path.join(results_dir, 'validation', 'validation_summary.csv')
+        summary_df.to_csv(summary_path, index=False)
+        print("\n" + "=" * 70)
+        print("VALIDATION SUMMARY")
+        print(summary_df.to_string(index=False))
+        print(f"\n✅ Validation summary saved to: {summary_path}")
+    else:
+        print("\n" + "=" * 70)
+        print("VALIDATION COMPLETE (no metrics computed, only predictions saved)")
+        print("=" * 70)
 
 
-
+# ---------------------------- MODIFIED MAIN BLOCK ----------------------------
 if __name__ == "__main__":
-    main()
+    import sys
+
+    print("\n" + "=" * 70)
+    print("TEA LEAF DETECTION SYSTEM")
+    print("=" * 70)
+    print("\nOptions:")
+    print("1. Train models on tea leaf dataset")
+    print("2. Test a single image")
+    print("3. Validate on validation folder (requires trained models)")
+
+    choice = input("\nEnter choice (1, 2, or 3, default=1): ").strip()
+
+    if choice == "2":
+        image_path = input("Enter image path to test: ").strip()
+        if os.path.exists(image_path):
+            main_with_prediction(image_path)
+        else:
+            print(f"Error: Image not found at {image_path}")
+            print("Running training instead...")
+            main_with_prediction()
+    elif choice == "3":
+        # Determine a sensible default validation folder
+        if os.path.exists('data/validation'):
+            default_val = 'data/validation'
+        else:
+            default_val = 'validation'
+        val_folder = input(f"Enter validation folder path (default='{default_val}'): ").strip()
+        if not val_folder:
+            val_folder = default_val
+        if not os.path.exists(val_folder):
+            print(f"❌ Validation folder '{val_folder}' does not exist.")
+        else:
+            validate_models(val_folder, 'results')
+    else:
+        main_with_prediction()
