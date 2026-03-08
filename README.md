@@ -76,8 +76,8 @@ joblib
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/tea-leaf-detection.git
-   cd tea-leaf-detection
+   git clone https://github.com/Chehan2004/DSGP_GROUP_36.git
+   cd tea_leaf_recognition
    ```
 
 2. Install the required packages (see above).
