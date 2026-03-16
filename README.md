@@ -4,11 +4,12 @@ TeaVision is an automated system for assessing tea leaves. It uses machine learn
 
 ### Key Components
 
-- **App Entry**: `app.py` serves as the main interface for the user.
-- **Detection**: `TeaDetector.py` localizes tea leaves within images.
-- **Classification**: `TeaDiseaseClassifier.py` identifies specific diseases on the leaves.
-- **Grading**: `QualityGrader.py` assesses the quality of the tea leaves.
-- **Recommendation**: `TeaFertilizerRecommender.py` provides fertilizer suggestions based on leaf data.
+- app.py: Main user interface.
+- TeaLeafPredictor.py: Primary inference engine for "Leaf or Not" binary validation and leaf assessment.
+- TeaDetector.py: Localization and region extraction.
+- TeaDiseaseClassifier.py: Multi-class disease identification.
+- QualityGrader.py: Neural network grading (T0-T4).
+- TeaFertilizerRecommender.py: Fertilizer dosage suggestions.
 
 ### Deployment Requirements
 
@@ -16,3 +17,4 @@ TeaVision is an automated system for assessing tea leaves. It uses machine learn
 - **System Dependencies**: Linux requirements are listed in `packages.txt`.
 - **Styling**: Custom UI elements are defined in `style.css`.
 - **Exclusions**: Large model weights and data files are excluded from the repository via `.gitignore`.
+- Version: TeaVision_v01_20260316_Base
