@@ -1,0 +1,18 @@
+# LeafDet Maintenance Protocol
+models/
+data/
+logs/
+test_images/
+
+# IDE and Python Caches
+.idea/
+__pycache__/
+.DS_Store
+
+# Virtual Environment
+venv/
+.venv/
+
+# Large ML Weights (Safety check)
+*.pt
+*.onnx

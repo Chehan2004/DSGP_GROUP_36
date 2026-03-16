@@ -1,0 +1,305 @@
+@import url("https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=Source+Sans+3:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap");
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   THEME TOKENS
+   ───────────────────────────────────────────────────────────────────────── */
+:root {
+    --tv-green-strong: #404040;
+    --tv-green-mid: #737373;
+    --tv-green-soft: #a3a3a3;
+    --tv-amber: #525252;
+    --tv-amber-light: rgba(82, 82, 82, 0.15);
+
+    --tv-bg: #0a0a0a;
+    --tv-surface: #171717;
+    --tv-text-1: #f5f5f5;
+    --tv-text-2: #a3a3a3;
+    --tv-text-3: #737373;
+    --tv-border: #262626;
+}
+
+/* ── Base ── */
+html,
+body,
+[class*="css"] {
+    font-family: "Source Sans 3", sans-serif;
+    color: var(--tv-text-1);
+}
+.stApp {
+    background-color: var(--tv-bg);
+}
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"] {
+    background-color: #121212 !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+[data-testid="stSidebar"] * {
+    color: #a3a3a3 !important;
+}
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 {
+    color: #f5f5f5 !important;
+    font-family: "Playfair Display", serif !important;
+    font-weight: 600;
+}
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] .stSlider label {
+    color: #d4d4d4 !important;
+    font-size: 0.78rem !important;
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+[data-testid="stSidebar"] small,
+[data-testid="stSidebar"] .stCaption,
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {
+    color: #737373 !important;
+    font-size: 0.72rem !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploadDropzone"] {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 6px !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploadDropzone"]:hover {
+    background: rgba(255, 255, 255, 0.1) !important;
+    border-color: var(--tv-green-mid) !important;
+}
+[data-testid="stSidebar"] hr {
+    border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* ── Typography ── */
+h1 {
+    font-family: "Playfair Display", serif !important;
+    font-size: 2.4rem !important;
+    font-weight: 600 !important;
+    color: var(--tv-text-1) !important;
+    letter-spacing: -0.01em;
+    line-height: 1.1 !important;
+}
+h2,
+h3 {
+    font-family: "Playfair Display", serif !important;
+    color: var(--tv-text-1) !important;
+    font-weight: 600 !important;
+}
+h4,
+h5 {
+    font-family: "Source Sans 3", sans-serif !important;
+    color: var(--tv-text-2) !important;
+    font-weight: 600 !important;
+    font-size: 0.78rem !important;
+    letter-spacing: 0.1em !important;
+    text-transform: uppercase !important;
+}
+.stMarkdown p {
+    font-size: 0.9rem;
+    color: var(--tv-text-2);
+    line-height: 1.65;
+}
+hr {
+    border-color: var(--tv-border) !important;
+    opacity: 1;
+}
+
+/* ── Buttons (Fixed Center & No-Wrap) ── */
+div[data-testid="stButton"] {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+}
+.stButton > button {
+    background-color: var(--tv-green-strong) !important;
+    color: #f5f5f5 !important;
+    border: none !important;
+    border-radius: 4px !important;
+    padding: 0.5rem 1.5rem !important;
+    font-family: "Source Sans 3", sans-serif !important;
+    font-size: 0.76rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.1em !important;
+    text-transform: uppercase !important;
+    transition:
+        background-color 0.18s ease,
+        box-shadow 0.18s ease !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5) !important;
+    display: block !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    width: fit-content !important;
+    white-space: nowrap !important;
+}
+.stButton > button:hover {
+    background-color: var(--tv-green-mid) !important;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.7) !important;
+}
+
+/* ── Alerts ── */
+.stSuccess > div {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+    border-left: 3px solid var(--tv-green-mid) !important;
+    border-radius: 0 4px 4px 0 !important;
+    color: var(--tv-text-1) !important;
+}
+.stInfo > div {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+    border-left: 3px solid var(--tv-green-soft) !important;
+    border-radius: 0 4px 4px 0 !important;
+    color: var(--tv-text-2) !important;
+}
+.stError > div {
+    background-color: var(--tv-amber-light) !important;
+    border-left: 3px solid var(--tv-amber) !important;
+    border-radius: 0 4px 4px 0 !important;
+    color: var(--tv-text-1) !important;
+}
+.stWarning > div {
+    background-color: var(--tv-amber-light) !important;
+    border-left: 3px solid var(--tv-amber) !important;
+    border-radius: 0 4px 4px 0 !important;
+    color: var(--tv-text-1) !important;
+}
+
+/* ── Images ── */
+[data-testid="stImage"] img {
+    border-radius: 6px !important;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* ── Metrics ── */
+[data-testid="stMetric"] {
+    background: var(--tv-surface) !important;
+    border: 1px solid var(--tv-border) !important;
+    border-radius: 6px !important;
+    padding: 0.85rem 1rem !important;
+}
+[data-testid="stMetricLabel"] p {
+    font-size: 0.72rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+    color: var(--tv-text-3) !important;
+}
+[data-testid="stMetricValue"] {
+    font-family: "Playfair Display", serif !important;
+    font-size: 1.8rem !important;
+    color: var(--tv-text-1) !important;
+}
+
+/* ── Form inputs ── */
+.stSelectbox > div > div,
+.stNumberInput > div > div > input,
+.stTextInput > div > div > input {
+    background-color: var(--tv-surface) !important;
+    border: 1px solid var(--tv-border) !important;
+    border-radius: 4px !important;
+    color: var(--tv-text-1) !important;
+    font-family: "Source Sans 3", sans-serif !important;
+    font-size: 0.875rem !important;
+}
+.stSelectbox > div > div:focus-within,
+.stNumberInput > div > div > input:focus,
+.stTextInput > div > div > input:focus {
+    border-color: var(--tv-green-mid) !important;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1) !important;
+}
+.stForm {
+    background-color: var(--tv-surface) !important;
+    border: 1px solid var(--tv-border) !important;
+    border-radius: 8px !important;
+    padding: 1.25rem 1.25rem 1rem !important;
+}
+.stForm [data-testid="stFormSubmitButton"] > button {
+    background-color: var(--tv-green-strong) !important;
+    color: #f5f5f5 !important;
+    width: 100% !important;
+}
+
+/* ── Leaf card labels ── */
+.tv-leaf-label {
+    text-align: center;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tv-leaf-conf {
+    text-align: center;
+    font-size: 0.68rem;
+    color: var(--tv-text-3);
+    margin-bottom: 6px;
+    white-space: nowrap;
+}
+.leaf-badge {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 2px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.badge-verified {
+    background: rgba(255, 255, 255, 0.1);
+    color: #f5f5f5;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+.badge-other {
+    background: rgba(255, 255, 255, 0.05);
+    color: #a3a3a3;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* ── Section label ── */
+.section-label {
+    font-family: "Source Sans 3", sans-serif;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--tv-text-3);
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--tv-border);
+}
+
+/* ── Subtitle ── */
+.tv-subtitle {
+    font-size: 0.95rem;
+    color: var(--tv-text-3);
+    font-weight: 300;
+    margin-top: -0.6rem;
+    margin-bottom: 1.5rem;
+    letter-spacing: 0.02em;
+}
+
+/* ── Empty state card ── */
+.tv-empty {
+    text-align: center;
+    padding: 3.5rem 2rem;
+    background: var(--tv-surface);
+    border: 1px solid var(--tv-border);
+    border-radius: 8px;
+    margin-top: 1rem;
+}
+.tv-empty-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--tv-text-1);
+    margin-bottom: 0.35rem;
+    letter-spacing: 0.01em;
+}
+.tv-empty-sub {
+    font-size: 0.82rem;
+    color: var(--tv-text-3);
+    font-weight: 300;
+    margin: 0;
+}
