@@ -1,5 +1,4 @@
 # LeafDet Maintenance Protocol
-models/
 data/
 logs/
 test_images/
@@ -16,3 +15,4 @@ venv/
 # Large ML Weights (Safety check)
 *.pt
 *.onnx
+models/

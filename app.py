@@ -298,7 +298,11 @@ if st.session_state.get('selected_leaf') is not None:
                 humidity      = f2.number_input("Humidity (%)",     min_value=0.0, max_value=100.0, value=80.0)
                 temp          = f1.number_input("Temperature (°C)", min_value=-10.0, max_value=50.0, value=25.0)
                 disease_input = f2.text_input("Disease Name",       value=selected['disease_label'])
-                severity      = f1.selectbox("Severity",            ["Low", "Medium", "High"])
+                severity = f1.selectbox("Severity", [
+                                            "Low - Seen in less than 3 plants",
+                                            "Medium - Seen in less than 10 plants",
+                                            "High - Seen in more than 10 plants"
+                                        ])
                 model_choice  = f2.selectbox("ML Model",            ["random_forest", "decision_tree", "gradient_boosting"])
 
                 submit_button = st.form_submit_button("Generate Recommendation")
