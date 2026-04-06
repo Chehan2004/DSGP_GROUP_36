@@ -303,19 +303,45 @@ if st.session_state.get('selected_leaf') is not None:
                                             "Medium - Seen in less than 10 plants",
                                             "High - Seen in more than 10 plants"
                                         ])
-                model_choice  = f2.selectbox("ML Model",            ["random_forest", "decision_tree", "gradient_boosting"])
+                model_choice  = f2.selectbox("ML Model", ["rf", "dt", "gb"],
+                                             format_func=lambda x: {
+                                                 "rf": "Random Forest",
+                                                 "dt": "Decision Tree",
+                                                 "gb": "Gradient Boosting"
+                                             }[x])
 
                 submit_button = st.form_submit_button("Generate Recommendation")
 
             if submit_button:
                 try:
-                    fert, dose = fertilizer_recommender.predict(
-                        soil_type, soil_pH, rainfall, humidity, temp,
-                        disease_input, severity, model_choice
+                    result = fertilizer_recommender.predict(
+                        model_key=model_choice,
+                        soil_type=soil_type,
+                        soil_pH=soil_pH,
+                        rainfall_mm_week=rainfall,
+                        humidity_percent=humidity,
+                        temperature_c=temp,
+                        disease=disease_input,
+                        disease_severity=severity,
                     )
+
+                    st.markdown("#### Recommendation Results")
+
                     r1, r2 = st.columns(2)
-                    r1.success(f"**Recommended Fertilizer:**\n\n{fert}")
-                    r2.info(f"**Recommended Dosage:**\n\n{dose}")
+                    r1.success(f"**Recommended Fertilizer**\n\n{result['fertilizer']}")
+                    r2.info(f"**Recommended Dosage**\n\n{result['dosage']}")
+
+                    if result.get("confidence") is not None:
+                        st.metric("Model Confidence", f"{result['confidence']:.1%}")
+
+                    if result.get("disease_type") or result.get("treatment"):
+                        st.markdown("#### Disease Treatment Plan")
+                        t1, t2 = st.columns(2)
+                        if result.get("disease_type"):
+                            t1.warning(f"**Disease Type**\n\n{result['disease_type'].capitalize()}")
+                        if result.get("treatment"):
+                            t2.error(f"**Recommended Treatment**\n\n{result['treatment']}")
+
                 except Exception as e:
                     st.error(f"Recommendation error: {e}")
     else:
